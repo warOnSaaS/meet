@@ -8,3 +8,4 @@ node_modules
 data/
 .vercel
 test-results/
+!.env.example
