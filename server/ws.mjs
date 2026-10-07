@@ -9,7 +9,7 @@ export function attachWs(server, app) {
     const url = new URL(req.url, 'http://x');
     if (url.pathname !== '/media/ws') return socket.destroy();
     const v = verify(app.config.secret, url.searchParams.get('token'), 'peer');
-    const peer = v && (await app.db.get('SELECT * FROM room_peers WHERE peer_id = ?', [v.peer]));
+    const peer = v && (await app.db.get('SELECT * FROM meet_peers WHERE peer_id = ?', [v.peer]));
     if (!peer) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => {
       const since = Number(url.searchParams.get('since') ?? 0);

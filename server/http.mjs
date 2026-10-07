@@ -79,7 +79,7 @@ export function createApp({ db, config }) {
     const tok = req.headers['x-meet-peer'] || url.searchParams.get('token');
     const v = verify(config.secret, tok, 'peer');
     if (!v) return null;
-    return db.get('SELECT * FROM room_peers WHERE peer_id = ?', [v.peer]);
+    return db.get('SELECT * FROM meet_peers WHERE peer_id = ?', [v.peer]);
   }
 
   async function media(req, res, p, url, base) {
@@ -98,7 +98,7 @@ export function createApp({ db, config }) {
       const m = await db.get('SELECT * FROM meetings WHERE id = ?', [meetingId]);
       if (!m || m.status === 'ended') return json(res, 410, { ok: false, error: { code: 'ended', message: 'This meeting has ended.' } });
       // One browser connection per participant: a reload replaces the old one.
-      if (kind === 'browser') for (const old of await db.all("SELECT peer_id FROM room_peers WHERE participant_id = ? AND kind = 'browser'", [participantId])) await room.leave(old.peer_id);
+      if (kind === 'browser') for (const old of await db.all("SELECT peer_id FROM meet_peers WHERE participant_id = ? AND kind = 'browser'", [participantId])) await room.leave(old.peer_id);
       const { peer, cursor } = await room.join(meetingId, { participantId, kind, client, metrics: b.metrics ?? null });
       const token = sign(config.secret, { k: 'peer', peer, mid: meetingId, exp: Date.now() + 24 * 3600e3 });
       return json(res, 200, { ok: true, peer, token, cursor, plan: await room.currentPlan(meetingId), ws: !config.serverless, room: m.room_name });
@@ -134,7 +134,7 @@ export function createApp({ db, config }) {
     // A browser lost its host. If that host has also gone quiet here, drop it now instead of waiting.
     if (p === '/media/report' && req.method === 'POST') {
       const b = await body(req);
-      const h = b.dead && (await db.get("SELECT * FROM room_peers WHERE peer_id = ? AND meeting_id = ? AND kind = 'host'", [b.dead, peer.meeting_id]));
+      const h = b.dead && (await db.get("SELECT * FROM meet_peers WHERE peer_id = ? AND meeting_id = ? AND kind = 'host'", [b.dead, peer.meeting_id]));
       if (h && Date.now() - Number(h.last_seen) > 4000) await room.leave(h.peer_id);
       return json(res, 200, { ok: true, dropped: !!(h && Date.now() - Number(h.last_seen) > 4000) });
     }

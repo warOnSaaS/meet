@@ -102,7 +102,7 @@ async function mediaFor(ctx, m, p) {
 }
 
 async function inCallSet(ctx, m) {
-  const rows = await ctx.db.all("SELECT participant_id FROM room_peers WHERE meeting_id = ? AND kind = 'browser'", [m.id]);
+  const rows = await ctx.db.all("SELECT participant_id FROM meet_peers WHERE meeting_id = ? AND kind = 'browser'", [m.id]);
   return new Set(rows.map((r) => r.participant_id));
 }
 
@@ -263,7 +263,7 @@ export const tools = [
       const p = await me(ctx, m);
       if (!p) return { left: false };
       await ctx.db.run("UPDATE meeting_participants SET status = 'left', left_at = ?, sharing = 0, hand_raised = 0 WHERE id = ?", [now(), p.id]);
-      const peers = await ctx.db.all('SELECT peer_id FROM room_peers WHERE participant_id = ?', [p.id]);
+      const peers = await ctx.db.all('SELECT peer_id FROM meet_peers WHERE participant_id = ?', [p.id]);
       for (const r of peers) await ctx.room.leave(r.peer_id);
       await ctx.room.changed(m.id, 'participants');
       return { left: true };
@@ -279,7 +279,7 @@ export const tools = [
       await ctx.db.run("UPDATE meetings SET status = 'ended', ended_at = ? WHERE id = ?", [now(), m.id]);
       await ctx.db.run("UPDATE meeting_participants SET status = 'left', left_at = ? WHERE meeting_id = ? AND status IN ('admitted', 'waiting')", [now(), m.id]);
       await ctx.room.broadcast(m.id, 'ended', { by: (await me(ctx, m))?.display_name ?? 'the host' });
-      await ctx.db.run('DELETE FROM room_peers WHERE meeting_id = ?', [m.id]);
+      await ctx.db.run('DELETE FROM meet_peers WHERE meeting_id = ?', [m.id]);
       return { ended: m.id };
     },
   },
@@ -344,7 +344,7 @@ export const tools = [
       if (!p && !isOwner(ctx, m)) fail('forbidden', 'Join the meeting first.', 403);
       const plan = await ctx.room.currentPlan(m.id);
       const peers = await ctx.room.peersOf(m.id);
-      const hosts = (await ctx.db.all("SELECT * FROM room_peers WHERE meeting_id = ? AND kind = 'host'", [m.id])).map((h) => {
+      const hosts = (await ctx.db.all("SELECT * FROM meet_peers WHERE meeting_id = ? AND kind = 'host'", [m.id])).map((h) => {
         const met = h.metrics ? JSON.parse(h.metrics) : {};
         const inPlan = plan?.hosts?.find((x) => x.peer === h.peer_id);
         return { peer: h.peer_id, name: met.name ?? 'A computer', client: h.client, upload_mbps: met.uploadMbps ?? null, carrying: !!inPlan, capacity: inPlan?.capacity ?? null, load: inPlan?.load ?? null, status: plan?.hostStatus?.[h.peer_id]?.ok ? 'ready' : plan?.hostStatus?.[h.peer_id]?.why ?? 'measuring' };
@@ -405,7 +405,7 @@ export const tools = [
       if (t.role === 'host') fail('forbidden', 'The host cannot be removed.', 403);
       await ctx.db.run("UPDATE meeting_participants SET status = 'removed', left_at = ? WHERE id = ?", [now(), t.id]);
       await ctx.room.broadcast(m.id, 'cmd', { to_pid: t.id, removed: true });
-      for (const r of await ctx.db.all('SELECT peer_id FROM room_peers WHERE participant_id = ?', [t.id])) await ctx.room.leave(r.peer_id);
+      for (const r of await ctx.db.all('SELECT peer_id FROM meet_peers WHERE participant_id = ?', [t.id])) await ctx.room.leave(r.peer_id);
       await ctx.room.changed(m.id, 'participants');
       return { removed: t.id };
     },

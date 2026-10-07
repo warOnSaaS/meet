@@ -94,6 +94,16 @@ Direct calls, measured on one Mac (10 cores, 32 GB) with Chromium's fake camera 
 | 2 people: from the guest's Join click to both seeing and hearing each other, including the 2 s waiting-room check and the host's click | 3.2 to 3.4 s | 3.2 s |
 | 3 people: same, for the third person | 3.2 to 3.3 s | 3.2 s |
 
+Against the deployed site (https://meet.waronsaas.com on Vercel, region pdx1, Neon Postgres in us-west-2), from a Mac in the eastern US, `node test/live/p2p-live.mjs`, 2026-10-07. Real: the deployed server, its database and its long-polling signalling. Not real: all three browsers ran on one Mac, so media went over loopback, not across the internet.
+
+| | |
+|---|---|
+| Host in the call, from opening the home page | 2.2 s |
+| Host sees a guest waiting | 1.4 s after the guest clicks Join |
+| 2 people seeing and hearing each other | 4.5 s after the guest clicks Join (includes the host's click to let them in) |
+| 3 people, everyone sees and hears everyone | 5.3 s after the third person clicks Join |
+| A chat message reaching the others | 0.4 s |
+
 ## Licence
 
 AGPL-3.0-only. The ui-design kit in `public/ui` is Apache-2.0. mediasoup is ISC, LiveKit's client is Apache-2.0.

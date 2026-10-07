@@ -3,7 +3,7 @@
 // room and host controls, over WebSocket signalling and over long-polling (what Vercel can do).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, launch, joinAs, inCall, waitForMedia, sleep } from '../helpers.mjs';
+import { startServer, launch, joinAs, inCall, waitForMedia } from '../helpers.mjs';
 
 for (const transport of ['websocket', 'polling']) {
   test(`p2p calls, 2 then 3 people, signalling over ${transport}`, async (t) => {
@@ -83,9 +83,7 @@ for (const transport of ['websocket', 'polling']) {
     // Casey leaves; the others drop to one connection each.
     await casey.page.click('#bar [data-act=leave]');
     await host.waitForFunction(async () => Object.keys((await window.meetCall.snapshot()).stats).length === 1, null, { timeout: 10000 });
-    await sleep(300);
-    const after = await host.evaluate(() => window.meetCall.snapshot());
-    assert.equal(after.tiles.length, 2);
+    await host.waitForFunction(() => window.meetCall.view().tiles.length === 2, null, { timeout: 10000 });
 
     console.log(`  ${transport}: 2 people connected in ${twoMs} ms from join click, 3 people in ${threeMs} ms`);
   });

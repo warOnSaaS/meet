@@ -16,7 +16,7 @@ export function createRoom({ db, config }) {
   let lastReap = 0;
 
   async function send(meetingId, from, to, type, body) {
-    const r = await db.run('INSERT INTO signals (meeting_id, to_peer, from_peer, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?)', [meetingId, to, from, type, body == null ? null : JSON.stringify(body), now()]);
+    const r = await db.run('INSERT INTO meet_signals (meeting_id, to_peer, from_peer, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?)', [meetingId, to, from, type, body == null ? null : JSON.stringify(body), now()]);
     wake.emit(meetingId);
     return r.lastId;
   }
@@ -25,7 +25,7 @@ export function createRoom({ db, config }) {
 
   async function fetchFor(meetingId, peer, since, limit = 200) {
     const rows = await db.all(
-      "SELECT id, from_peer, to_peer, type, body FROM signals WHERE meeting_id = ? AND id > ? AND (to_peer = ? OR (to_peer = '*' AND from_peer <> ?)) ORDER BY id LIMIT ?",
+      "SELECT id, from_peer, to_peer, type, body FROM meet_signals WHERE meeting_id = ? AND id > ? AND (to_peer = ? OR (to_peer = '*' AND from_peer <> ?)) ORDER BY id LIMIT ?",
       [meetingId, since, peer, peer, limit],
     );
     return rows.map((r) => ({ id: Number(r.id), from: r.from_peer, to: r.to_peer, type: r.type, body: r.body ? JSON.parse(r.body) : null }));
@@ -45,7 +45,7 @@ export function createRoom({ db, config }) {
         wake.on(peerRow.meeting_id, done);
       });
       if (isGone()) return [];
-      if (!(await db.get('SELECT peer_id FROM room_peers WHERE peer_id = ?', [peerRow.peer_id]))) return [{ id: since, from: 'server', type: 'gone', body: null }];
+      if (!(await db.get('SELECT peer_id FROM meet_peers WHERE peer_id = ?', [peerRow.peer_id]))) return [{ id: since, from: 'server', type: 'gone', body: null }];
     }
   }
 
@@ -72,36 +72,36 @@ export function createRoom({ db, config }) {
   }
 
   async function touch(peer) {
-    await db.run('UPDATE room_peers SET last_seen = ? WHERE peer_id = ?', [now(), peer]);
+    await db.run('UPDATE meet_peers SET last_seen = ? WHERE peer_id = ?', [now(), peer]);
   }
 
   async function join(meetingId, { participantId = null, kind = 'browser', client = 'browser', metrics = null }) {
     const peer = id(kind === 'host' ? 'h_' : 'p_');
-    const cursor = Number((await db.get('SELECT MAX(id) AS m FROM signals WHERE meeting_id = ?', [meetingId]))?.m ?? 0);
-    await db.run('INSERT INTO room_peers (peer_id, meeting_id, participant_id, kind, client, metrics, joined_at, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [peer, meetingId, participantId, kind, client, metrics ? JSON.stringify(metrics) : null, now(), now()]);
+    const cursor = Number((await db.get('SELECT MAX(id) AS m FROM meet_signals WHERE meeting_id = ?', [meetingId]))?.m ?? 0);
+    await db.run('INSERT INTO meet_peers (peer_id, meeting_id, participant_id, kind, client, metrics, joined_at, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [peer, meetingId, participantId, kind, client, metrics ? JSON.stringify(metrics) : null, now(), now()]);
     await replan(meetingId);
     return { peer, cursor };
   }
 
   async function leave(peer) {
-    const row = await db.get('SELECT * FROM room_peers WHERE peer_id = ?', [peer]);
+    const row = await db.get('SELECT * FROM meet_peers WHERE peer_id = ?', [peer]);
     if (!row) return;
-    await db.run('DELETE FROM room_peers WHERE peer_id = ?', [peer]);
+    await db.run('DELETE FROM meet_peers WHERE peer_id = ?', [peer]);
     await broadcast(row.meeting_id, 'peer-left', { peer });
     await replan(row.meeting_id);
   }
 
   async function setMetrics(peer, metrics) {
-    const row = await db.get('SELECT * FROM room_peers WHERE peer_id = ?', [peer]);
+    const row = await db.get('SELECT * FROM meet_peers WHERE peer_id = ?', [peer]);
     if (!row) return;
-    await db.run('UPDATE room_peers SET metrics = ?, last_seen = ? WHERE peer_id = ?', [JSON.stringify(metrics), now(), peer]);
+    await db.run('UPDATE meet_peers SET metrics = ?, last_seen = ? WHERE peer_id = ?', [JSON.stringify(metrics), now(), peer]);
     await replan(row.meeting_id);
   }
 
   async function drain(peer) {
-    const row = await db.get('SELECT * FROM room_peers WHERE peer_id = ?', [peer]);
+    const row = await db.get('SELECT * FROM meet_peers WHERE peer_id = ?', [peer]);
     if (!row) return;
-    await db.run('UPDATE room_peers SET draining = 1 WHERE peer_id = ?', [peer]);
+    await db.run('UPDATE meet_peers SET draining = 1 WHERE peer_id = ?', [peer]);
     await replan(row.meeting_id);
   }
 
@@ -109,20 +109,20 @@ export function createRoom({ db, config }) {
   async function reap(force = false) {
     if (!force && now() - lastReap < 2000) return;
     lastReap = now();
-    const stale = await db.all('SELECT peer_id, meeting_id FROM room_peers WHERE last_seen < ?', [now() - STALE_MS]);
+    const stale = await db.all('SELECT peer_id, meeting_id FROM meet_peers WHERE last_seen < ?', [now() - STALE_MS]);
     const meetings = new Set();
     for (const s of stale) {
-      await db.run('DELETE FROM room_peers WHERE peer_id = ?', [s.peer_id]);
+      await db.run('DELETE FROM meet_peers WHERE peer_id = ?', [s.peer_id]);
       await broadcast(s.meeting_id, 'peer-left', { peer: s.peer_id, stale: true });
       meetings.add(s.meeting_id);
     }
     for (const m of meetings) await replan(m);
-    if (Math.random() < 0.05) await db.run('DELETE FROM signals WHERE created_at < ?', [now() - 10 * 60 * 1000]);
+    if (Math.random() < 0.05) await db.run('DELETE FROM meet_signals WHERE created_at < ?', [now() - 10 * 60 * 1000]);
   }
 
   async function peersOf(meetingId) {
     const rows = await db.all(
-      `SELECT rp.*, mp.display_name, mp.role, mp.status FROM room_peers rp LEFT JOIN meeting_participants mp ON mp.id = rp.participant_id WHERE rp.meeting_id = ?`,
+      `SELECT rp.*, mp.display_name, mp.role, mp.status FROM meet_peers rp LEFT JOIN meeting_participants mp ON mp.id = rp.participant_id WHERE rp.meeting_id = ?`,
       [meetingId],
     );
     return rows
@@ -131,7 +131,7 @@ export function createRoom({ db, config }) {
   }
 
   async function currentPlan(meetingId) {
-    const s = await db.get('SELECT version, plan FROM room_state WHERE meeting_id = ?', [meetingId]);
+    const s = await db.get('SELECT version, plan FROM meet_room_state WHERE meeting_id = ?', [meetingId]);
     return s ? { ...JSON.parse(s.plan), version: Number(s.version) } : null;
   }
 
@@ -148,9 +148,9 @@ export function createRoom({ db, config }) {
     const version = (prev?.version ?? 0) + 1;
     const body = JSON.stringify(plan);
     let ok;
-    if (prev) ok = (await db.run('UPDATE room_state SET version = ?, plan = ?, updated_at = ? WHERE meeting_id = ? AND version = ?', [version, body, now(), meetingId, prev.version])).changes === 1;
+    if (prev) ok = (await db.run('UPDATE meet_room_state SET version = ?, plan = ?, updated_at = ? WHERE meeting_id = ? AND version = ?', [version, body, now(), meetingId, prev.version])).changes === 1;
     else {
-      try { await db.run('INSERT INTO room_state (meeting_id, version, plan, updated_at) VALUES (?, ?, ?, ?)', [meetingId, version, body, now()]); ok = true; } catch { ok = false; }
+      try { await db.run('INSERT INTO meet_room_state (meeting_id, version, plan, updated_at) VALUES (?, ?, ?, ?)', [meetingId, version, body, now()]); ok = true; } catch { ok = false; }
     }
     if (!ok) return currentPlan(meetingId);
     const out = { ...plan, version };

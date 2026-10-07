@@ -42,7 +42,7 @@ async function openPg(url) {
     async all(sql, params = []) { return (await q.query(conv(sql), params)).rows; },
     async get(sql, params = []) { return (await q.query(conv(sql), params)).rows[0] ?? null; },
     async run(sql, params = []) {
-      const isInsert = /^\s*insert/i.test(sql) && !/returning/i.test(sql) && /\bsignals\b/.test(sql);
+      const isInsert = /^\s*insert/i.test(sql) && !/returning/i.test(sql) && /\binsert\s+into\s+(meet_signals|meeting_chat)\b/i.test(sql);
       const r = await q.query(conv(sql) + (isInsert ? ' RETURNING id' : ''), params);
       return { changes: r.rowCount, lastId: isInsert ? Number(r.rows[0]?.id) : undefined };
     },

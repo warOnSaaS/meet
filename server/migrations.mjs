@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS meetings (
   locked INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'meeting', media_pref TEXT NOT NULL DEFAULT 'auto',
   e2ee_key TEXT NOT NULL, linked_record TEXT, created_at BIGINT NOT NULL, started_at BIGINT, ended_at BIGINT
 );
-CREATE INDEX IF NOT EXISTS meetings_team_starts ON meetings (team_id, starts_at);
-CREATE INDEX IF NOT EXISTS meetings_linked ON meetings (linked_record);
+CREATE INDEX IF NOT EXISTS meet_meetings_team_starts ON meetings (team_id, starts_at);
+CREATE INDEX IF NOT EXISTS meet_meetings_linked ON meetings (linked_record);
 CREATE TABLE IF NOT EXISTS meeting_participants (
   id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   user_id TEXT, guest_name TEXT, display_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'guest',
@@ -25,12 +25,12 @@ CREATE TABLE IF NOT EXISTS meeting_participants (
   audio_on INTEGER NOT NULL DEFAULT 1, video_on INTEGER NOT NULL DEFAULT 1, sharing INTEGER NOT NULL DEFAULT 0,
   hand_raised INTEGER NOT NULL DEFAULT 0, layout TEXT NOT NULL DEFAULT 'grid', kind TEXT NOT NULL DEFAULT 'person'
 );
-CREATE INDEX IF NOT EXISTS mp_meeting ON meeting_participants (meeting_id, status);
+CREATE INDEX IF NOT EXISTS meet_mp_meeting ON meeting_participants (meeting_id, status);
 CREATE TABLE IF NOT EXISTS meeting_chat (
   id ${serial(d)}, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   participant_id TEXT, display_name TEXT NOT NULL, body TEXT NOT NULL, created_at BIGINT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS mc_meeting ON meeting_chat (meeting_id, id);
+CREATE INDEX IF NOT EXISTS meet_mc_meeting ON meeting_chat (meeting_id, id);
 CREATE TABLE IF NOT EXISTS meeting_requests (
   id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   participant_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT, created_at BIGINT NOT NULL, done_at BIGINT
@@ -41,18 +41,18 @@ CREATE TABLE IF NOT EXISTS meeting_requests (
     id: 2,
     name: 'live room: peers, signals, plan',
     sql: (d) => `
-CREATE TABLE IF NOT EXISTS room_peers (
+CREATE TABLE IF NOT EXISTS meet_peers (
   peer_id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   participant_id TEXT, kind TEXT NOT NULL, client TEXT NOT NULL DEFAULT 'browser', metrics TEXT,
   joined_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, draining INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS rp_meeting ON room_peers (meeting_id);
-CREATE TABLE IF NOT EXISTS signals (
+CREATE INDEX IF NOT EXISTS meet_rp_meeting ON meet_peers (meeting_id);
+CREATE TABLE IF NOT EXISTS meet_signals (
   id ${serial(d)}, meeting_id TEXT NOT NULL, to_peer TEXT NOT NULL, from_peer TEXT NOT NULL,
   type TEXT NOT NULL, body TEXT, created_at BIGINT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS signals_to ON signals (meeting_id, to_peer, id);
-CREATE TABLE IF NOT EXISTS room_state (
+CREATE INDEX IF NOT EXISTS meet_signals_to ON meet_signals (meeting_id, to_peer, id);
+CREATE TABLE IF NOT EXISTS meet_room_state (
   meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, updated_at BIGINT NOT NULL
 );
 `,
@@ -61,15 +61,15 @@ CREATE TABLE IF NOT EXISTS room_state (
     id: 3,
     name: 'v1 tables, empty until recording and notes ship',
     sql: `
-CREATE TABLE IF NOT EXISTS recordings (
+CREATE TABLE IF NOT EXISTS meet_recordings (
   id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   file_id TEXT, duration_s INTEGER, consent_state TEXT NOT NULL DEFAULT 'asking', started_by TEXT, started_at BIGINT, stopped_at BIGINT
 );
-CREATE TABLE IF NOT EXISTS recording_consents (
-  recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, participant_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS meet_recording_consents (
+  recording_id TEXT NOT NULL REFERENCES meet_recordings(id) ON DELETE CASCADE, participant_id TEXT NOT NULL,
   answer TEXT NOT NULL, answered_at BIGINT NOT NULL, notice_shown_at BIGINT NOT NULL, PRIMARY KEY (recording_id, participant_id)
 );
-CREATE TABLE IF NOT EXISTS transcripts (
+CREATE TABLE IF NOT EXISTS meet_transcripts (
   meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE, segments TEXT NOT NULL, language TEXT
 );
 CREATE TABLE IF NOT EXISTS meeting_notes (

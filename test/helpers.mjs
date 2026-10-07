@@ -9,6 +9,8 @@ export async function startServer(env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meet-test-'));
   Object.assign(process.env, { SESSION_SECRET: 'test-secret-'.padEnd(40, 'x'), DEV_LOGIN: '1', MEET_DB: path.join(dir, 'meet.db'), STUN_URLS: '', ...env });
   delete process.env.DATABASE_URL;
+  // MEET_TEST_DATABASE_URL runs the same tests on Postgres (a database used only for tests).
+  if (process.env.MEET_TEST_DATABASE_URL && !env.DATABASE_URL) env = { ...env, DATABASE_URL: process.env.MEET_TEST_DATABASE_URL };
   const { openDb } = await import('../server/db.mjs');
   const { loadConfig } = await import('../server/config.mjs');
   const { createApp } = await import('../server/http.mjs');
