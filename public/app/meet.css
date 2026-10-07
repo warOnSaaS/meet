@@ -126,6 +126,7 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
 /* ---------- phone ---------- */
 @media (max-width:760px){
   .meet-pre{grid-template-columns:1fr}
+  .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}
   .meet-ways{grid-template-columns:1fr}
   .meet-body{padding:6px 8px 0}
   .meet-call[data-panel=people] .meet-body,.meet-call[data-panel=chat] .meet-body,.meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}

@@ -7,8 +7,8 @@
 export const SOURCES = ['mic', 'cam', 'screen'];
 
 export class P2PEngine {
-  constructor({ signal, me, local, ice, onTrack, onTrackGone, onPeerState }) {
-    Object.assign(this, { signal, me, local, ice, onTrack, onTrackGone, onPeerState });
+  constructor({ signal, me, local, ice, canPublish = true, onTrack, onTrackGone, onPeerState }) {
+    Object.assign(this, { signal, me, local, ice, canPublish, onTrack, onTrackGone, onPeerState });
     this.kind = 'p2p';
     this.pcs = new Map();
     this.off = [];
@@ -82,7 +82,7 @@ export class P2PEngine {
       const t = list[i];
       if (!t) continue;
       t.direction = 'sendrecv';
-      await t.sender.replaceTrack(this.local[SOURCES[i]] ?? null);
+      await t.sender.replaceTrack(this.canPublish ? this.local[SOURCES[i]] ?? null : null);
       if (SOURCES[i] === 'cam') this.tune(t.sender, 'cam');
     }
   }
@@ -119,8 +119,16 @@ export class P2PEngine {
     }
   }
 
+  // A webinar viewer sends nothing; when the host lets them speak, their tracks go into the slots.
+  async setCanPublish(on) {
+    if (on === this.canPublish) return;
+    this.canPublish = on;
+    for (const c of this.pcs.values()) await this.fillSlots(c);
+  }
+
   async setTrack(source, track) {
     this.local[source] = track;
+    if (!this.canPublish) return;
     const i = SOURCES.indexOf(source);
     for (const c of this.pcs.values()) {
       const t = c.pc.getTransceivers().slice().sort((a, b) => Number(a.mid) - Number(b.mid))[i];

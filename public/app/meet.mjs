@@ -177,16 +177,18 @@ async function joinPage(token) {
   const hostKey = qs.get('host');
   const name = m.you?.display_name ?? state.who.user?.name ?? store.get('meet:name') ?? '';
   const prefs = { audio: store.get('meet:audio') !== '0', video: store.get('meet:video') !== '0' };
+  // Webinar viewers are not asked for the camera and microphone until the host lets them speak.
+  const viewer = m.kind === 'webinar' && !hostKey && !m.you_host && !['speaker', 'cohost', 'host'].includes(m.you?.role);
   app.innerHTML = `${topBar()}
-  <main class="meet-pre">
-    <div class="meet-pre-v">
+  <main class="meet-pre ${viewer ? 'is-viewer' : ''}">
+    ${viewer ? `<div class="meet-pre-v"><div class="ui-tile meet-preview is-cam-off"><span class="ui-avatar">${icon('people', 28)}</span></div><p class="ui-hint meet-perm">You join as a viewer. If the host lets you speak, your browser will ask for your microphone and camera then.</p></div>` : `<div class="meet-pre-v">
       <div class="ui-tile meet-preview ${prefs.video ? '' : 'is-cam-off'}" id="preview"><video autoplay playsinline muted></video><span class="ui-avatar">${esc(initials(name || '?'))}</span><span class="ui-tile-n">${esc(name || 'You')}</span></div>
       <div class="ui-callbar">
         <button data-tool="none" data-why="chooses whether you join with the microphone on; nothing is sent before you join" id="pmic" aria-pressed="${prefs.audio}" aria-label="Microphone">${icon(prefs.audio ? 'mic' : 'mic-off')}</button>
         <button data-tool="none" data-why="chooses whether you join with the camera on; nothing is sent before you join" id="pcam" aria-pressed="${prefs.video}" aria-label="Camera">${icon(prefs.video ? 'cam' : 'cam-off')}</button>
       </div>
       <p class="ui-hint meet-perm" id="perm"></p>
-    </div>
+    </div>`}
     <form class="meet-pre-f" data-tool="meet.join" id="jf">
       <p class="ui-label">${m.kind === 'webinar' ? 'Webinar' : 'Meeting'}</p>
       <h1 class="meet-h">${esc(m.title)}</h1>
@@ -203,6 +205,7 @@ async function joinPage(token) {
   const video = app.querySelector('#preview video');
   const perm = document.getElementById('perm');
   async function getMedia() {
+    if (viewer) return;
     try {
       const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } } });
       local.mic = s.getAudioTracks()[0] ?? null;
@@ -220,8 +223,8 @@ async function joinPage(token) {
   const mediaReady = getMedia();
   const pmic = document.getElementById('pmic');
   const pcam = document.getElementById('pcam');
-  pmic.onclick = () => { prefs.audio = !prefs.audio; if (local.mic) local.mic.enabled = prefs.audio; pmic.setAttribute('aria-pressed', prefs.audio); pmic.innerHTML = icon(prefs.audio ? 'mic' : 'mic-off'); store.set('meet:audio', prefs.audio ? '1' : '0'); };
-  pcam.onclick = async () => {
+  if (pmic) pmic.onclick = () => { prefs.audio = !prefs.audio; if (local.mic) local.mic.enabled = prefs.audio; pmic.setAttribute('aria-pressed', prefs.audio); pmic.innerHTML = icon(prefs.audio ? 'mic' : 'mic-off'); store.set('meet:audio', prefs.audio ? '1' : '0'); };
+  if (pcam) pcam.onclick = async () => {
     prefs.video = !prefs.video;
     pcam.setAttribute('aria-pressed', prefs.video); pcam.innerHTML = icon(prefs.video ? 'cam' : 'cam-off'); store.set('meet:video', prefs.video ? '1' : '0');
     document.getElementById('preview').classList.toggle('is-cam-off', !prefs.video);

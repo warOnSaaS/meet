@@ -36,6 +36,7 @@ export class LiveKitEngine {
     room.on(lk.RoomEvent.EncryptionError, () => { this.e2eeErrors = (this.e2eeErrors ?? 0) + 1; });
     if (e2ee) { await this.keyProvider.setKey(this.e2eeKey); await room.setE2EEEnabled(true); }
     await room.connect(t.url, t.token);
+    this.tokenCanPublish = this.canPublish;
     if (this.canPublish) for (const s of ['mic', 'cam', 'screen']) if (this.local[s]) await this.publish(s, this.local[s]);
   }
 
@@ -60,6 +61,12 @@ export class LiveKitEngine {
     if (on === this.canPublish) return;
     this.canPublish = on;
     if (!this.room) return;
+    // A viewer's token cannot publish: connect again with a new one now that the host lets them speak.
+    if (on && !this.tokenCanPublish) {
+      await this.room.disconnect();
+      this.room = null; this.connecting = null;
+      return this.update();
+    }
     if (on) { for (const s of ['mic', 'cam', 'screen']) if (this.local[s] && !this.pubs[s]) await this.publish(s, this.local[s]); }
     else for (const s of Object.keys(this.pubs)) { await this.room.localParticipant.unpublishTrack(this.pubs[s].track, false); delete this.pubs[s]; }
   }

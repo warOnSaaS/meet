@@ -30,6 +30,7 @@ Or without Docker: `npm install && npm start` (Node 22 or newer). It uses SQLite
 | Meetings | Start now, schedule for later (with a calendar invite), join by link. Guests need no account. |
 | In the call | Grid and speaker views, screen share, mute, camera, chat, raise hand. |
 | Host controls | Waiting room, let in or turn away, mute someone or everyone, make co-hosts, ask someone to share, remove, lock, end for everyone. |
+| Webinars | A few speakers, many viewers. Viewers send nothing and are not asked for a camera; they raise a hand, and the host lets them speak (only then does their browser ask for the microphone and camera). Viewers see and hear speakers 1 to 3 s late, which smooths playback and leaves room for longer paths between computers; speakers talk with each other live. |
 | Agents | Every button is also a tool an agent can call, over MCP at `/mcp` or REST at `/api/tools/<name>`. A person still has to allow the camera and choose what screen to share. |
 | Other apps | `meet.huddle` opens (or finds) the live room for a record, such as a Chat channel, with no waiting room. Chat huddles use it. |
 | Export | `meet.export` gives you every meeting you host, who joined and the chat, as JSON. |
@@ -120,6 +121,8 @@ Everything below ran on one Mac (Apple silicon, 10 cores, 32 GB) on 2026-10-07: 
 | Star: more than 5 hosts (`test/load/big-call.mjs --hosts=7 --people=6 --upload=12`) | 6 | 6 of 7 (1 root relaying, 5 leaves) | Everyone sees and hears everyone. Audio delay 71 to 203 ms, including two hops between hosts. Killing a leaf carrying 3: all flowing again within 7.5 s. Killing the root: within 6.8 s (other hosts report it after 2 s of silence; before that fix it took 24 to 27 s). |
 | Largest this Mac held (`--hosts=4 --people=12 --kill`) | 12 | 2 used of 4 | Everyone sees and hears everyone; the Mac's CPU was 96 to 99% busy, almost all of it the 12 browsers encoding and decoding video (each host sent only about 6 Mbit/s). Most people saw and heard all within 2 to 6 s of joining; at full CPU some took 15 to 34 s. Audio delay at full CPU: 0.7 to 1.2 s. Killing a host carrying 6: the other 6 people were back in about 2 s, the 6 who moved in 10 to 15 s. |
 | Earlier run, same size (`--hosts=3 --people=12`) | 12 | 3, mesh | Everyone sees and hears everyone. Killing a host carrying 6: all back within 7.9 s. |
+
+| Webinar (`test/e2e/webinar.test.mjs`) | 2 speakers, 4 viewers | 1 | Viewers connect only to speakers and send nothing through the host. Sam to Jordan (speakers): 59 to 78 ms. Sam to each viewer: 1.21 to 1.26 s (the viewers' receive buffer is set to 2 s; Chrome delivers a little less). |
 
 What these numbers do not show: real networks (loss, jitter, NAT, distance), hosts on separate computers, and more than 12 people, which this Mac cannot run as browsers. Expect real calls to add the internet's delay to the audio numbers above. Bugs these tests found and fixed are in the commit history (for example, closing a host connection used to stop the person's own camera).
 

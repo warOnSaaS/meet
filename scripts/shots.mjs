@@ -70,6 +70,39 @@ for (const scheme of ['dark', 'light']) {
     await anon.context().close();
   }
 }
+// Webinar: the viewer's join page and call, and the host with a raised hand.
+for (const [w, h, tag] of [[1440, 900, 'desk'], [390, 844, 'phone']]) {
+  const viewport = { width: w, height: h };
+  const opts = { viewport, colorScheme: 'dark', permissions: ['camera', 'microphone'] };
+  const snap = async (page, name) => { const f = `${out}${tag}-dark-${name}.png`; await page.waitForTimeout(400); await page.screenshot({ path: f }); shots.push(f); };
+  const host = await (await browser.newContext(opts)).newPage();
+  await host.goto(`${srv.base}/auth/dev?login=sam&name=Sam%20Rivera`);
+  await host.click('#start');
+  await host.waitForSelector('#jf');
+  await host.click('#jf button[type=submit]');
+  await inCall(host);
+  const meeting = await host.evaluate(() => window.meetCall.meeting);
+  await host.click('#bar [data-act=people]');
+  await host.click('#side [data-panel=info]');
+  await host.click('#side [data-act=webinar]');
+  await host.click('#side [data-act=waiting-room]');
+  await host.click('#side [data-act=close]');
+  const viewer = await (await browser.newContext(opts)).newPage();
+  await viewer.goto(meeting.join_url);
+  await viewer.waitForSelector('.meet-pre.is-viewer');
+  await viewer.fill('#jf input[name=name]', 'Jordan Lee');
+  await snap(viewer, '12-webinar-join-viewer');
+  await viewer.click('#jf button[type=submit]');
+  await inCall(viewer);
+  await waitForMedia(viewer, 1);
+  await viewer.click('#bar [data-act=hand]');
+  await snap(viewer, '13-webinar-viewer');
+  await host.click('#bar [data-act=people]');
+  await host.waitForSelector('#side [data-act=role]', { state: 'attached' });
+  await snap(host, '14-webinar-host-hand');
+  await viewer.context().close();
+  await host.context().close();
+}
 await browser.close();
 await srv.close();
 console.log(shots.join('\n'));

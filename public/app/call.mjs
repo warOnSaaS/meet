@@ -9,6 +9,9 @@ import { Signal } from './signal.mjs';
 import { esc, icon, toast, initials, copyText } from './dom.mjs';
 
 const SPEAK_LEVEL = 0.03;
+// Webinar viewers hear and see speakers this much later (a receive buffer, 1 to 3 s as decided): smoother
+// playback, and room for the longer paths of a broadcast tree.
+export const VIEWER_DELAY_MS = 2000;
 
 export class Call {
   constructor({ root, meeting, participant, media, local, prefs, onExit }) {
@@ -117,7 +120,9 @@ export class Call {
       if (want === 'livekit') { const { LiveKitEngine } = await import('./media/livekit.mjs'); this.engine = new LiveKitEngine(cbs); }
     }
     try {
-      if (want === 'p2p') await this.engine.update(plan.p2p);
+      // In a webinar, viewers connect only to people who speak; two viewers have nothing to send each other.
+      const isViewer = (p) => this.meeting.kind === 'webinar' && plan.peers?.[p]?.role === 'viewer';
+      if (want === 'p2p') await this.engine.update(plan.p2p.filter((p) => p === this.peer || !(isViewer(p) && isViewer(this.peer))));
       else if (this.engine) await this.engine.update(plan);
       this.engine?.setCanPublish?.(canPublish);
     } catch (e) { console.warn('[meet] media', e); toast(e.message); }
@@ -134,6 +139,7 @@ export class Call {
   onTrack({ peer, source, track, receiver }) {
     const key = `${peer}:${source}`;
     this.remote.set(key, { track, receiver });
+    this.applyDelay(receiver);
     if (track.kind === 'audio') {
       let a = this.audios.get(peer);
       if (!a) { a = document.createElement('audio'); a.autoplay = true; a.dataset.peer = peer; this.root.querySelector('#audios').append(a); this.audios.set(peer, a); }
@@ -150,6 +156,32 @@ export class Call {
     this.remote.delete(key);
     const [peer, source] = key.split(':');
     if (source === 'mic' && x?.track.kind === 'audio') { const a = this.audios.get(peer); if (a) { a.srcObject = null; a.remove(); this.audios.delete(peer); } }
+    this.render();
+  }
+
+  isViewer() { return this.meeting.kind === 'webinar' && this.myRole() === 'viewer'; }
+
+  applyDelay(receiver) {
+    if (!receiver || !('jitterBufferTarget' in receiver)) return;
+    try { receiver.jitterBufferTarget = this.isViewer() ? VIEWER_DELAY_MS : null; } catch {}
+  }
+
+  // The host let me speak (or made me a viewer again): ask for the microphone and camera now, the first
+  // time (the browser asks the person), and start or stop sending.
+  async roleChanged() {
+    const can = this.canPublish();
+    for (const x of this.remote.values()) this.applyDelay(x.receiver);
+    if (can && !this.local.mic && !this.local.cam) {
+      try {
+        const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+        this.local.mic = st.getAudioTracks()[0] ?? null; this.local.cam = st.getVideoTracks()[0] ?? null;
+      } catch { toast('The browser blocked the microphone or camera. Allow them with the icon in the address bar.'); }
+      this.audioOn = !!this.local.mic; this.videoOn = !!this.local.cam;
+      for (const src of ['mic', 'cam']) if (this.local[src]) await this.engine?.setTrack(src, this.local[src]);
+      callTool('meet.set_my_media', { meeting: this.meeting.id, audio: this.audioOn, video: this.videoOn }).catch(() => {});
+    }
+    await this.engine?.setCanPublish?.(can);
+    if (this.meeting.kind === 'webinar') toast(can ? 'The host let you speak. Your microphone is on.' : 'You are watching again.');
     this.render();
   }
 
@@ -187,7 +219,12 @@ export class Call {
         this.waitingList = (await callTool('meet.list_waiting', { meeting: this.meeting.id }).catch(() => ({ waiting: [] }))).waiting;
       } else this.waitingList = [];
       const mine = this.people.find((p) => p.id === this.me.id);
-      if (mine && this.engine?.setCanPublish) this.engine.setCanPublish(this.canPublish());
+      if (mine && this.lastRole && mine.role !== this.lastRole) this.roleChanged();
+      if (mine) this.lastRole = mine.role;
+      // Hosts hear about raised hands.
+      const hands = new Set(this.people.filter((p) => p.hand_raised && p.id !== this.me.id).map((p) => p.id));
+      if (this.amHost()) for (const id of hands) if (!this.hands?.has(id)) toast(`${this.people.find((p) => p.id === id).display_name} raised their hand`);
+      this.hands = hands;
     } catch (e) { if (e.code === 'forbidden') return this.exit('You are no longer in this meeting.'); }
     this.render();
   }
@@ -383,7 +420,7 @@ export class Call {
     for (const p of inCall) {
       const mine = p.id === this.me.id;
       const cam = mine ? (this.videoOn ? this.local.cam : null) : (p.video_on ? this.remoteFor(p.id, 'cam') : null);
-      if (this.meeting.kind === 'webinar' && p.role === 'viewer' && !mine) continue;
+      if (this.meeting.kind === 'webinar' && p.role === 'viewer') continue;
       list.push({ key: `${p.id}:cam`, pid: p.id, p, track: cam, mine, audio: mine ? this.audioOn : p.audio_on });
       const scr = mine ? this.local.screen : (p.sharing ? this.remoteFor(p.id, 'screen') : null);
       if (scr) list.push({ key: `${p.id}:screen`, pid: p.id, p, track: scr, mine, screen: true });
@@ -479,6 +516,7 @@ export class Call {
   renderNotices() {
     const out = [];
     const p = this.plan;
+    if (this.isViewer()) out.push(`<div class="ui-notice is-quiet"><span>You are watching${this.meeting.kind === 'webinar' ? ' a webinar' : ''}. Raise your hand to ask to speak.</span></div>`);
     if (p && p.capped?.includes(this.peer)) out.push(`<div class="ui-notice"><span>${esc(p.message ?? 'This call is full.')}</span></div>`);
     else if (p?.message && this.amHost()) out.push(`<div class="ui-notice is-quiet"><span>${esc(p.message)}</span></div>`);
     if (this.peerTrouble.size) {
@@ -546,8 +584,8 @@ export class Call {
     const webinar = this.meeting.kind === 'webinar';
     const row = (p) => {
       const mine = p.id === this.me.id;
-      const chips = [p.role === 'host' ? 'Host' : p.role === 'cohost' ? 'Co-host' : webinar && p.role === 'speaker' ? 'Speaker' : '', p.is_guest ? 'Guest' : '', p.kind === 'agent' ? 'Agent' : '', !p.in_call && !mine ? 'Not connected' : ''].filter(Boolean);
-      const acts = host && !mine && p.role !== 'host' ? `<div class="meet-prow-a">
+      const chips = [p.role === 'host' ? 'Host' : p.role === 'cohost' ? 'Co-host' : webinar && p.role === 'speaker' ? 'Speaker' : webinar && p.role === 'viewer' ? 'Viewer' : '', p.is_guest && !webinar ? 'Guest' : '', p.kind === 'agent' ? 'Agent' : '', !p.in_call && !mine ? 'Not connected' : ''].filter(Boolean);
+      const acts = host && !mine && p.role !== 'host' ? `<div class="meet-prow-a ${webinar && p.hand_raised ? 'is-on' : ''}">
         ${p.audio_on ? `<button class="ui-btn is-ghost is-sm" data-tool="meet.mute_participant" data-act="mute" data-pid="${p.id}">Mute</button>` : ''}
         ${webinar ? (p.role === 'viewer' ? `<button class="ui-btn is-ghost is-sm" data-tool="meet.set_role" data-act="role" data-role="speaker" data-pid="${p.id}">Let speak</button>` : `<button class="ui-btn is-ghost is-sm" data-tool="meet.set_role" data-act="role" data-role="viewer" data-pid="${p.id}">Make viewer</button>`)
           : `<button class="ui-btn is-ghost is-sm" data-tool="meet.set_role" data-act="role" data-role="${p.role === 'cohost' ? (p.is_guest ? 'guest' : 'member') : 'cohost'}" data-pid="${p.id}">${p.role === 'cohost' ? 'Remove co-host' : 'Make co-host'}</button>`}
@@ -557,7 +595,9 @@ export class Call {
       return `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(p.display_name))}</span><div class="meet-prow-m"><span>${esc(p.display_name)}${mine ? ' (you)' : ''}</span><span class="meet-prow-c">${chips.map((c) => `<span class="ui-chip is-outline">${c}</span>`).join('')}${p.hand_raised ? `<span class="ui-chip is-soft">${icon('hand', 12)} Hand up</span>` : ''}</span></div><span class="meet-prow-i ${p.audio_on ? '' : 'is-off'}" title="${p.audio_on ? 'Mic on' : 'Muted'}">${icon(p.audio_on ? 'mic' : 'mic-off', 16)}</span>${acts}</li>`;
     };
     const waiting = host && this.waitingList?.length ? `<h3 class="meet-side-sub">Waiting <span class="ui-badge">${this.waitingList.length}</span></h3><ul class="meet-plist">${this.waitingList.map((w) => `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(w.display_name))}</span><div class="meet-prow-m"><span>${esc(w.display_name)}</span><span class="meet-prow-c">${w.is_guest ? '<span class="ui-chip is-outline">Guest</span>' : ''}</span></div><div class="meet-prow-a is-on"><button class="ui-btn is-sm" data-tool="meet.admit" data-act="admit" data-pid="${w.id}">Let in</button><button class="ui-btn is-ghost is-sm" data-tool="meet.deny" data-act="deny" data-pid="${w.id}">Deny</button></div></li>`).join('')}</ul><p><button class="ui-btn is-quiet is-sm" data-tool="meet.admit" data-act="admit-all">Let everyone in</button></p>` : '';
-    const inCall = this.people.filter((p) => p.in_call || p.id === this.me.id);
+    // Webinar: speakers first, then raised hands, then everyone watching.
+    const rank = (p) => (!webinar ? 0 : p.role !== 'viewer' ? 0 : p.hand_raised ? 1 : 2);
+    const inCall = this.people.filter((p) => p.in_call || p.id === this.me.id).sort((a, b) => rank(a) - rank(b));
     const away = this.people.filter((p) => !p.in_call && p.id !== this.me.id);
     const all = host ? `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.mute_participant" data-act="mute-all">Mute everyone</button><button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button></p>` : `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button></p>`;
     return `${waiting}${all}<h3 class="meet-side-sub">In the call</h3><ul class="meet-plist">${inCall.map(row).join('')}</ul>${away.length ? `<h3 class="meet-side-sub">Joined earlier</h3><ul class="meet-plist">${away.map(row).join('')}</ul>` : ''}`;
