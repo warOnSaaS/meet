@@ -4,7 +4,7 @@
 //   hosts    computers in the call forward the media, encrypted end to end (media/sfu.mjs)
 //   livekit  a LiveKit media server (media/livekit.mjs)
 // and shows a plain message when the room is full ("capped").
-import { callTool, mediaJoin, getTicket } from './api.mjs';
+import { callTool, mediaJoin, getTicket, getMediaBase } from './api.mjs';
 import { Signal } from './signal.mjs';
 import { esc, icon, toast, initials, copyText } from './dom.mjs';
 
@@ -44,7 +44,7 @@ export class Call {
     callTool('meet.set_my_media', { meeting: this.meeting.id, audio: this.audioOn, video: this.videoOn }).catch(() => {});
     const j = await mediaJoin({ ticket: getTicket() });
     this.peer = j.peer;
-    this.signal = new Signal({ token: j.token, cursor: j.cursor, ws: j.ws, onGone: () => this.gone(), onState: (s) => { this.signalMode = s; } });
+    this.signal = new Signal({ media: getMediaBase(), token: j.token, cursor: j.cursor, ws: j.ws, onGone: () => this.gone(), onState: (s) => { this.signalMode = s; } });
     this.signal.on('plan', (p) => this.applyPlan(p));
     this.signal.on('changed', (b) => this.onChanged(b));
     this.signal.on('cmd', (b) => this.onCmd(b));
@@ -55,7 +55,7 @@ export class Call {
     await Promise.all([this.loadPeople(), this.loadChat(), this.loadStatus()]);
     this.levelT = setInterval(() => this.pollLevels(), 250);
     this.statT = setInterval(() => this.refreshTrouble(), 3000);
-    window.addEventListener('pagehide', this.onHide = () => { navigator.sendBeacon?.('/media/leave?token=' + encodeURIComponent(j.token)); });
+    window.addEventListener('pagehide', this.onHide = () => { navigator.sendBeacon?.(`${getMediaBase()}/leave?token=` + encodeURIComponent(j.token)); });
     this.timings.joined = performance.now();
   }
 
@@ -606,7 +606,7 @@ export class Call {
   chatHtml() {
     const msgs = this.chat.map((m) => `<li class="meet-cmsg ${m.participant === this.me.id ? 'is-mine' : ''}"><span class="meet-cmsg-h"><b>${esc(m.name)}</b> <span class="ui-mute">${new Date(m.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></span><span class="meet-cmsg-b">${linkify(esc(m.body))}</span></li>`).join('');
     return `<ul class="meet-chatlist">${msgs || '<li class="ui-empty">Messages here are seen by everyone in the call.</li>'}</ul>
-      <form class="ui-composer meet-composer" data-tool="meet.send_chat" id="chatform"><label class="ui-sr" for="chatbox">Message</label><input id="chatbox" name="body" autocomplete="off" placeholder="Message everyone" maxlength="4000"><button class="ui-btn is-accent is-sm" type="submit">Send</button></form>`;
+      <form class="ui-composer meet-composer" data-tool="meet.send_chat" id="chatform"><label class="ui-sr" for="chatbox">Message</label><input id="chatbox" name="body" autocomplete="off" placeholder="Message everyone" maxlength="4000"><button class="ui-btn is-accent is-sm" type="submit" data-tool="meet.send_chat">Send</button></form>`;
   }
 
   infoHtml() {

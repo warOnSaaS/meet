@@ -1,28 +1,104 @@
-// The suite's way in (CONTRACTS.md): register(ctx) returns one handler per tool, plus the non-tool media
-// routes. Standalone, bin/meet.mjs serves the same handlers itself; this file lets the suite load them
-// with no rewrite. The suite's ctx.db has the same all/get/run/exec shape as server/db.mjs.
+// The suite's way in (CONTRACTS.md): register(ctx) returns one handler per tool, plus the call's media
+// routes under /media/meet/. Standalone, bin/meet.mjs serves the same handlers itself; this file lets the
+// suite load them with no rewrite.
+//
+// Inside the suite:
+//   - storage is the suite's database (ctx.db), adapted to the small all/get/run/exec shape server/db.mjs has;
+//   - every meeting carries the team's id; lists, huddles and exports only see the caller's team;
+//   - people are the suite's members (call.actor); a member of the meeting's team walks in, anyone else
+//     with the link (a person from another team) waits until a host lets them in;
+//   - signalling is long-polling under /media/meet/ (the suite does not pass WebSockets to apps);
+//   - the signing secret for tickets lives in the database, so every copy of the server agrees on it.
+import crypto from 'node:crypto';
 import { tools } from './server/tools/meet.mjs';
 import { loadConfig } from './server/config.mjs';
-import { createRoom } from './server/room/room.mjs';
 import { createApp } from './server/http.mjs';
 import { migrate } from './server/db.mjs';
 
+// Columns that are BIGINT on Postgres. The suite's driver returns them as strings; meet's code wants numbers.
+const NUMERIC = new Set(['id', 'n', 'm', 'version', 'created_at', 'starts_at', 'ends_at', 'started_at', 'ended_at', 'asked_at', 'joined_at', 'left_at', 'last_seen', 'updated_at', 'done_at', 'applied_at', 'answered_at', 'notice_shown_at', 'duration_min', 'duration_s']);
+const numbers = (row) => {
+  if (!row) return row;
+  for (const k of Object.keys(row)) if (NUMERIC.has(k) && typeof row[k] === 'string' && /^-?\d{1,16}$/.test(row[k])) row[k] = Number(row[k]);
+  return row;
+};
+const RETURNS_ID = /^\s*insert\s+into\s+(meet_signals|meeting_chat)\b/i;
+
+/** The suite's Db (query, get, run -> { changes }, tx) in the shape meet's code uses (all, get, run -> { changes, lastId }, exec, tx). */
+export function adaptDb(sdb) {
+  const wrap = (d) => ({
+    dialect: sdb.dialect === 'sqlite' ? 'sqlite' : 'postgres',
+    async all(sql, params = []) { return (await d.query(sql, params)).map(numbers); },
+    async get(sql, params = []) { return numbers((await d.get(sql, params)) ?? null); },
+    async run(sql, params = []) {
+      if (RETURNS_ID.test(sql) && !/returning/i.test(sql)) {
+        const rows = await d.query(`${sql} RETURNING id`, params);
+        return { changes: rows.length, lastId: Number(rows[0]?.id) };
+      }
+      return d.run(sql, params);
+    },
+    // A whole file of statements: the suite runs it in one call (SQLite exec, Postgres simple query).
+    async exec(sql) { await d.run(sql); },
+    async tx(fn) { return d.tx((t) => fn(wrap(t))); },
+  });
+  return wrap(sdb);
+}
+
+async function sharedSecret(db) {
+  await db.exec('CREATE TABLE IF NOT EXISTS meet_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const row = await db.get("SELECT value FROM meet_settings WHERE key = 'secret'");
+  if (row) return row.value;
+  const value = crypto.randomBytes(32).toString('hex');
+  try { await db.run("INSERT INTO meet_settings (key, value) VALUES ('secret', ?)", [value]); } catch { /* another copy wrote it first */ }
+  return (await db.get("SELECT value FROM meet_settings WHERE key = 'secret'")).value;
+}
+
 export default async function register(ctx) {
-  await migrate(ctx.db);
-  const config = { ...loadConfig(), ...(ctx.config ?? {}) };
-  const room = createRoom({ db: ctx.db, config });
-  const media = createApp({ db: ctx.db, config });
+  const db = adaptDb(ctx.db);
+  await migrate(db);
+  const env = {};
+  for (const k of ['SESSION_SECRET', 'TURN_URLS', 'TURN_SECRET', 'TURN_USERNAME', 'TURN_CREDENTIAL', 'STUN_URLS', 'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'P2P_MAX']) {
+    const v = ctx.env(k);
+    if (v) env[k] = v;
+  }
+  env.SESSION_SECRET ||= await sharedSecret(db);
+  const base = `${String(ctx.publicUrl ?? '').replace(/\/$/, '')}/a/meet`;
+  // serverless: no WebSocket for signalling, browsers long-poll (the suite never hands an app a socket).
+  const config = { ...loadConfig(env), publicUrl: base, serverless: true, ...(ctx.config ?? {}) };
+  const media = createApp({ db, config });
+  const room = media.room;
+
   const handlers = {};
   for (const t of tools) {
-    handlers[t.name] = (input, call) => t.handler({
-      db: ctx.db, config, room, base: call.base ?? config.publicUrl,
-      caller: { user: call.actor?.kind === 'person' ? { id: call.actor.id, name: call.actor.name ?? call.actor.id } : null, ticket: call.ticket ?? null },
-    }, input ?? {});
+    handlers[t.name] = async (input, call) => {
+      const person = call.actor?.kind === 'person' || call.actor?.personId;
+      const uid = call.actor?.personId ?? call.actor?.id;
+      const user = uid && call.actor?.kind !== 'system' ? { id: uid, name: call.actor.name ?? 'Someone', github_login: null, avatar_url: null, agent: !person } : null;
+      const out = await t.handler({ db, config, room, base, teamId: call.team?.id || null, caller: { user, ticket: null } }, input ?? {});
+      if (t.events?.length === 1) call.emit?.(t.events[0], { meeting: out?.id ?? out?.meeting?.id ?? input?.meeting ?? null });
+      return out;
+    };
   }
   return {
     handlers,
-    // Media signalling and the WebSocket live under /media/<app id>/ in the suite.
-    routes: () => ({ '/media/': (req, res) => media.handle(req, res) }),
+    // The call's own traffic (join, long-poll, send, leave) under /media/meet/. Tickets and peer tokens
+    // signed by this app say who may use it; tools stay the only way to change a meeting.
+    async routes(req, res, url) {
+      if (!url.pathname.startsWith('/media/meet/')) return false;
+      req.url = `/media/${url.pathname.slice('/media/meet/'.length)}${url.search}`;
+      room.reap().catch(() => {});
+      await media.handle(req, res);
+      return true;
+    },
+    async exportTeam(team) {
+      const meetings = await db.all('SELECT * FROM meetings WHERE team_id = ? ORDER BY created_at', [team.id]);
+      for (const m of meetings) {
+        delete m.e2ee_key;
+        m.participants = await db.all('SELECT * FROM meeting_participants WHERE meeting_id = ?', [m.id]);
+        m.chat = await db.all('SELECT * FROM meeting_chat WHERE meeting_id = ? ORDER BY id', [m.id]);
+      }
+      return { meetings };
+    },
   };
 }
 

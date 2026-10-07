@@ -4,11 +4,24 @@ let ticket = null;
 export const setTicket = (t) => { ticket = t; };
 export const getTicket = () => ticket;
 
+// Inside the wOS suite the screens get the suite's callTool (ctx.callTool), and the call's media lives under
+// /media/meet. Standalone keeps /api/tools and /media.
+let suiteCall = null;
+let mediaBase = '/media';
+export function configure({ callTool: fn, media } = {}) {
+  if (fn) suiteCall = fn;
+  if (media) mediaBase = media;
+}
+export const getMediaBase = () => mediaBase;
+
 export class ToolFailed extends Error {
   constructor(code, message, status) { super(message); this.code = code; this.status = status; }
 }
 
 export async function callTool(name, input = {}) {
+  if (suiteCall) {
+    try { return await suiteCall(name, input); } catch (e) { throw new ToolFailed(e.code ?? 'server', e.message ?? 'Something went wrong.', e.status ?? 0); }
+  }
   const headers = { 'content-type': 'application/json' };
   if (ticket) headers['x-meet-ticket'] = ticket;
   let r;
@@ -24,7 +37,7 @@ export async function callTool(name, input = {}) {
 
 // Media signalling is not a tool: it is the call's own traffic, under /media (CONTRACTS.md, non-tool traffic).
 export async function mediaJoin(body) {
-  const r = await fetch('/media/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const r = await fetch(`${mediaBase}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const d = await r.json().catch(() => ({}));
   if (!d.ok) throw new ToolFailed(d.error?.code ?? 'server', d.error?.message ?? 'Could not join the call.', r.status);
   return d;

@@ -8,7 +8,7 @@
   "requires": { "core": ">=0.1" },
   "tools": "./tools.json",
   "server": "./server.mjs",
-  "screens": "./public/app/meet.mjs",
+  "screens": "./dist/screens.mjs",
   "icon": "video",
   "nav": { "label": "Meetings", "order": 40 },
   "events": {
@@ -19,7 +19,7 @@
     "services": ["livekit (optional, compose profile meetings)", "turn (optional, coturn or LiveKit's built-in TURN)"],
     "permissions": ["camera", "microphone", "display-capture"],
     "desktop": ["participant host: runs host/host.mjs in the background, see docs/DESKTOP-HOST.md"],
-    "env": ["DATABASE_URL", "SESSION_SECRET", "PUBLIC_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "TURN_URLS", "TURN_SECRET", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+    "env": ["DATABASE_URL", "SESSION_SECRET", "PUBLIC_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "STUN_URLS", "TURN_URLS", "TURN_SECRET", "TURN_USERNAME", "TURN_CREDENTIAL", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "P2P_MAX"]
   },
   "data": { "onDisable": "keep", "exports": ["meetings", "meeting_participants", "meeting_chat"] }
 }

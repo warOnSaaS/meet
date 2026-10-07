@@ -1,0 +1,1860 @@
+// wOS Meetings screen part, built from screens/index.mjs by scripts/build-screens.mjs. AGPL-3.0. Do not edit.
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// public/app/api.mjs
+function configure({ callTool: fn, media } = {}) {
+  if (fn) suiteCall = fn;
+  if (media) mediaBase = media;
+}
+async function callTool(name, input = {}) {
+  if (suiteCall) {
+    try {
+      return await suiteCall(name, input);
+    } catch (e) {
+      throw new ToolFailed(e.code ?? "server", e.message ?? "Something went wrong.", e.status ?? 0);
+    }
+  }
+  const headers = { "content-type": "application/json" };
+  if (ticket) headers["x-meet-ticket"] = ticket;
+  let r;
+  try {
+    r = await fetch(`/api/tools/${name}`, { method: "POST", headers, body: JSON.stringify(input), credentials: "same-origin" });
+  } catch {
+    throw new ToolFailed("offline", "Could not reach the server. Check your connection.", 0);
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) throw new ToolFailed(d.error?.code ?? "server", d.error?.message ?? "Something went wrong.", r.status);
+  return d.result;
+}
+async function mediaJoin(body) {
+  const r = await fetch(`${mediaBase}/join`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) throw new ToolFailed(d.error?.code ?? "server", d.error?.message ?? "Could not join the call.", r.status);
+  return d;
+}
+var ticket, setTicket, getTicket, suiteCall, mediaBase, getMediaBase, ToolFailed;
+var init_api = __esm({
+  "public/app/api.mjs"() {
+    ticket = null;
+    setTicket = (t) => {
+      ticket = t;
+    };
+    getTicket = () => ticket;
+    suiteCall = null;
+    mediaBase = "/media";
+    getMediaBase = () => mediaBase;
+    ToolFailed = class extends Error {
+      constructor(code, message, status) {
+        super(message);
+        this.code = code;
+        this.status = status;
+      }
+    };
+  }
+});
+
+// public/app/dom.mjs
+function toast(msg, ms = 3200) {
+  if (toastFn) return toastFn(msg);
+  const t = document.getElementById("toast");
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add("is-on");
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove("is-on"), ms);
+}
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = Object.assign(document.createElement("textarea"), { value: text });
+    document.body.append(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+    }
+    ta.remove();
+    return false;
+  }
+}
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  const today = /* @__PURE__ */ new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const tomorrow = new Date(today.getTime() + 864e5).toDateString() === d.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return `today at ${time}`;
+  if (tomorrow) return `tomorrow at ${time}`;
+  return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} at ${time}`;
+}
+var esc, initials, toastT, toastFn, setToast, P, icon;
+var init_dom = __esm({
+  "public/app/dom.mjs"() {
+    esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    initials = (name) => String(name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+    toastFn = null;
+    setToast = (fn) => {
+      toastFn = fn;
+    };
+    P = {
+      video: '<rect x="3" y="6" width="12" height="12" rx="2.5"/><path d="M15 10.5l6-3.5v10l-6-3.5z"/>',
+      mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+      "mic-off": '<path d="M9 9v2a3 3 0 0 0 5 2.2M15 9.3V6a3 3 0 0 0-5.7-1.3M19 11a7 7 0 0 1-1 3.6M5 11a7 7 0 0 0 11.6 5.3M12 18v3M3 3l18 18"/>',
+      cam: '<rect x="3" y="6" width="12" height="12" rx="2.5"/><path d="M15 10.5l6-3.5v10l-6-3.5z"/>',
+      "cam-off": '<path d="M15 10.5l6-3.5v10l-3-1.7M3 3l18 18M9 6h4a2 2 0 0 1 2 2v4M15 16.5A2 2 0 0 1 13 18H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2"/>',
+      screen: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M9 10.5l3-3 3 3M12 7.5v6"/>',
+      hand: '<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4.5a1.5 1.5 0 0 1 3 0V11M14 10.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5a6 6 0 0 1-4.6-2.2L3.5 17a1.6 1.6 0 0 1 2.4-2.1L8 17"/>',
+      chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+      people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
+      grid: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>',
+      speaker: '<rect x="3" y="3" width="18" height="12" rx="1.5"/><rect x="3" y="17" width="5" height="4" rx="1"/><rect x="9.5" y="17" width="5" height="4" rx="1"/><rect x="16" y="17" width="5" height="4" rx="1"/>',
+      info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+      leave: '<path d="M3 15.5c5.5-5 12.5-5 18 0l-2.5 2.5-3-1.5v-3a12 12 0 0 0-7 0v3l-3 1.5z"/>',
+      x: '<path d="M6 6l12 12M18 6L6 18"/>',
+      lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+      link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+      github: '<path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>',
+      more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+      computer: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'
+    };
+    icon = (n, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] ?? ""}</svg>`;
+  }
+});
+
+// public/app/signal.mjs
+var Signal;
+var init_signal = __esm({
+  "public/app/signal.mjs"() {
+    Signal = class {
+      constructor({ base = "", media = "/media", token, cursor = 0, ws = false, onMessage, onGone, onState }) {
+        Object.assign(this, { base, media, token, cursor, useWs: ws, onMessage, onGone, onState });
+        this.handlers = /* @__PURE__ */ new Map();
+        this.out = [];
+        this.closed = false;
+        this.mode = null;
+        this.flushT = null;
+        this.rpcId = 0;
+        this.pending = /* @__PURE__ */ new Map();
+      }
+      // Messages that arrive before anyone listens for their type (an offer that lands before the media engine
+      // exists) are kept for 30 s and handed over when a listener for that type is added.
+      on(type, fn) {
+        (this.handlers.get(type) ?? this.handlers.set(type, []).get(type)).push(fn);
+        const held = (this.early ?? []).filter((m) => m.type === type && Date.now() - m.at < 3e4);
+        if (held.length) {
+          this.early = this.early.filter((m) => m.type !== type);
+          queueMicrotask(() => {
+            for (const m of held) {
+              try {
+                fn(m.body, m);
+              } catch (e) {
+                console.error(e);
+              }
+            }
+          });
+        }
+        return this;
+      }
+      start() {
+        if (this.useWs && typeof WebSocket !== "undefined") this.openWs();
+        else this.pollLoop();
+        return this;
+      }
+      dispatch(msgs) {
+        for (const m of msgs) {
+          if (m.id > this.cursor) this.cursor = m.id;
+          if (m.type === "gone") {
+            this.close();
+            this.onGone?.();
+            return;
+          }
+          if (m.type === "rpc-res" && this.pending.has(m.body?.rid)) {
+            const p = this.pending.get(m.body.rid);
+            this.pending.delete(m.body.rid);
+            clearTimeout(p.t);
+            m.body.ok ? p.resolve(m.body.data) : p.reject(Object.assign(new Error(m.body.error ?? "failed"), { code: m.body.code }));
+            continue;
+          }
+          try {
+            this.onMessage?.(m);
+          } catch (e) {
+            console.error(e);
+          }
+          const fns = this.handlers.get(m.type);
+          if (!fns?.length) {
+            this.early ??= [];
+            this.early.push({ ...m, at: Date.now() });
+            if (this.early.length > 500) this.early.shift();
+            continue;
+          }
+          for (const fn of [...fns]) {
+            try {
+              fn(m.body, m);
+            } catch (e) {
+              console.error(e);
+            }
+          }
+        }
+      }
+      openWs() {
+        const u = new URL(this.base || (typeof location !== "undefined" ? location.origin : "http://localhost"));
+        u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+        u.pathname = `${this.media}/ws`;
+        u.search = `?token=${encodeURIComponent(this.token)}&since=${this.cursor}`;
+        let opened = false;
+        const ws = new WebSocket(u.toString());
+        this.ws = ws;
+        ws.onopen = () => {
+          opened = true;
+          this.mode = "ws";
+          this.onState?.("ws");
+          this.flush();
+        };
+        ws.onmessage = (e) => {
+          const d = JSON.parse(e.data);
+          if (d.msgs) this.dispatch(d.msgs);
+        };
+        ws.onclose = () => {
+          this.ws = null;
+          if (this.closed) return;
+          if (!opened) {
+            this.useWs = false;
+            this.pollLoop();
+          } else setTimeout(() => !this.closed && this.openWs(), 500);
+        };
+        ws.onerror = () => {
+        };
+      }
+      async pollLoop() {
+        this.mode = "poll";
+        this.onState?.("poll");
+        let backoff = 250;
+        while (!this.closed) {
+          try {
+            const r = await fetch(`${this.base}${this.media}/signal?since=${this.cursor}&wait=8000`, { headers: { "x-meet-peer": this.token } });
+            if (r.status === 401) {
+              this.close();
+              this.onGone?.();
+              return;
+            }
+            const d = await r.json();
+            if (d.msgs) this.dispatch(d.msgs);
+            backoff = 250;
+          } catch {
+            await new Promise((res) => setTimeout(res, backoff));
+            backoff = Math.min(backoff * 2, 4e3);
+          }
+        }
+      }
+      send(to, type, body) {
+        this.out.push({ to, type, body });
+        if (!this.flushT) this.flushT = setTimeout(() => this.flush(), 0);
+      }
+      async flush() {
+        clearTimeout(this.flushT);
+        this.flushT = null;
+        if (!this.out.length || this.closed) return;
+        const msgs = this.out.splice(0);
+        if (this.ws?.readyState === 1) {
+          this.ws.send(JSON.stringify({ msgs }));
+          return;
+        }
+        try {
+          await fetch(`${this.base}${this.media}/signal`, { method: "POST", headers: { "content-type": "application/json", "x-meet-peer": this.token }, body: JSON.stringify({ msgs }) });
+        } catch {
+          this.out.unshift(...msgs);
+          setTimeout(() => this.flush(), 500);
+        }
+      }
+      // Request and reply between peers (browser to participant host, host to host).
+      request(to, method, data, timeoutMs = 1e4) {
+        const rid = `${Date.now().toString(36)}.${++this.rpcId}`;
+        return new Promise((resolve, reject) => {
+          const t = setTimeout(() => {
+            this.pending.delete(rid);
+            reject(Object.assign(new Error(`${method} timed out`), { code: "timeout" }));
+          }, timeoutMs);
+          this.pending.set(rid, { resolve, reject, t, to });
+          this.send(to, "rpc", { rid, method, data });
+        });
+      }
+      // A peer is gone: fail every request waiting on it now, instead of when each times out.
+      failTo(peer) {
+        for (const [rid, p] of this.pending) {
+          if (p.to !== peer) continue;
+          this.pending.delete(rid);
+          clearTimeout(p.t);
+          p.reject(Object.assign(new Error("That computer left the call."), { code: "gone" }));
+        }
+      }
+      // Serve requests: fn(method, data, from) returns the reply data or throws.
+      serve(fn) {
+        this.on("rpc", async (b, m) => {
+          try {
+            this.send(m.from, "rpc-res", { rid: b.rid, ok: true, data: await fn(b.method, b.data, m.from) });
+          } catch (e) {
+            this.send(m.from, "rpc-res", { rid: b.rid, ok: false, error: e.message, code: e.code });
+          }
+        });
+      }
+      async post(path, body) {
+        const r = await fetch(`${this.base}${path.replace(/^\/media(?=\/)/, this.media)}`, { method: "POST", headers: { "content-type": "application/json", "x-meet-peer": this.token }, body: JSON.stringify(body ?? {}) });
+        return r.json();
+      }
+      close() {
+        this.closed = true;
+        try {
+          this.ws?.close();
+        } catch {
+        }
+        for (const p of this.pending.values()) {
+          clearTimeout(p.t);
+          p.reject(new Error("closed"));
+        }
+        this.pending.clear();
+      }
+    };
+  }
+});
+
+// public/app/media/p2p.mjs
+var p2p_exports = {};
+__export(p2p_exports, {
+  P2PEngine: () => P2PEngine,
+  SOURCES: () => SOURCES
+});
+var SOURCES, P2PEngine;
+var init_p2p = __esm({
+  "public/app/media/p2p.mjs"() {
+    SOURCES = ["mic", "cam", "screen"];
+    P2PEngine = class {
+      constructor({ signal, me, local, ice, canPublish = true, onTrack, onTrackGone, onPeerState }) {
+        Object.assign(this, { signal, me, local, ice, canPublish, onTrack, onTrackGone, onPeerState });
+        this.kind = "p2p";
+        this.pcs = /* @__PURE__ */ new Map();
+        this.off = [];
+        this.chain = Promise.resolve();
+        const h = (b, m) => {
+          this.chain = this.chain.then(() => this.onSignal(m.from, b)).catch((e) => console.warn("[meet] p2p", e.message));
+        };
+        signal.on("p2p", h);
+        this.handler = h;
+      }
+      isOfferer(other) {
+        return this.me < other;
+      }
+      async update(peers) {
+        this.want = new Set(peers.filter((p) => p !== this.me));
+        for (const [p, c] of this.pcs) if (!this.want.has(p)) this.drop(p, c);
+        for (const p of this.want) if (!this.pcs.has(p) && this.isOfferer(p)) await this.connect(p);
+      }
+      makePc(peer) {
+        const pc = new RTCPeerConnection({ iceServers: this.ice, bundlePolicy: "max-bundle" });
+        const c = { pc, peer, pendingIce: [], restarts: 0, tracks: /* @__PURE__ */ new Map(), state: "connecting" };
+        pc.onicecandidate = (e) => e.candidate && this.signal.send(peer, "p2p", { ice: e.candidate.toJSON() });
+        pc.ontrack = (e) => {
+          const source = SOURCES[this.slotOf(pc, e.transceiver)] ?? "cam";
+          c.tracks.set(source, e.track);
+          this.onTrack?.({ peer, source, track: e.track, receiver: e.receiver });
+        };
+        pc.oniceconnectionstatechange = () => this.watch(c);
+        pc.onconnectionstatechange = () => this.watch(c);
+        this.pcs.set(peer, c);
+        return c;
+      }
+      slotOf(pc, t) {
+        const list = pc.getTransceivers().slice().sort((a, b) => Number(a.mid) - Number(b.mid));
+        return list.indexOf(t);
+      }
+      watch(c) {
+        const s = c.pc.connectionState;
+        const state2 = s === "connected" ? "connected" : s === "failed" ? "failed" : s === "disconnected" ? "unstable" : "connecting";
+        if (state2 !== c.state) {
+          c.state = state2;
+          this.onPeerState?.(c.peer, state2, this.reasonFor(c));
+        }
+        if (s === "failed" && this.isOfferer(c.peer) && c.restarts < 3) {
+          c.restarts++;
+          this.offer(c, true).catch(() => {
+          });
+        }
+      }
+      reasonFor(c) {
+        if (c.state !== "failed") return null;
+        const turn = this.ice.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
+        return turn ? "The connection failed even through the relay server." : "A firewall on one side blocks direct calls. A relay (TURN) server would fix this; an admin can add one.";
+      }
+      async connect(peer) {
+        const c = this.makePc(peer);
+        for (const kind of ["audio", "video", "video"]) c.pc.addTransceiver(kind, { direction: "sendrecv" });
+        await this.fillSlots(c);
+        await this.offer(c, false);
+      }
+      async offer(c, restart) {
+        const offer = await c.pc.createOffer(restart ? { iceRestart: true } : void 0);
+        await c.pc.setLocalDescription(offer);
+        this.signal.send(c.peer, "p2p", { sdp: c.pc.localDescription.toJSON() });
+      }
+      async fillSlots(c) {
+        const list = c.pc.getTransceivers().slice().sort((a, b) => Number(a.mid ?? 99) - Number(b.mid ?? 99));
+        for (let i = 0; i < SOURCES.length; i++) {
+          const t = list[i];
+          if (!t) continue;
+          t.direction = "sendrecv";
+          await t.sender.replaceTrack(this.canPublish ? this.local[SOURCES[i]] ?? null : null);
+          if (SOURCES[i] === "cam") this.tune(t.sender, "cam");
+        }
+      }
+      async tune(sender, source) {
+        try {
+          const p = sender.getParameters();
+          if (!p.encodings?.length) return;
+          const n = Math.max(1, this.want?.size ?? 1);
+          p.encodings[0].maxBitrate = source === "screen" ? 2e6 : n <= 1 ? 15e5 : 7e5;
+          await sender.setParameters(p);
+        } catch {
+        }
+      }
+      async onSignal(from, b) {
+        let c = this.pcs.get(from);
+        if (b.sdp) {
+          if (b.sdp.type === "offer") {
+            if (!c) c = this.makePc(from);
+            await c.pc.setRemoteDescription(b.sdp);
+            await this.fillSlots(c);
+            const ans = await c.pc.createAnswer();
+            await c.pc.setLocalDescription(ans);
+            this.signal.send(from, "p2p", { sdp: c.pc.localDescription.toJSON() });
+          } else if (c) {
+            await c.pc.setRemoteDescription(b.sdp);
+          }
+          if (c) for (const cand of c.pendingIce.splice(0)) await c.pc.addIceCandidate(cand).catch(() => {
+          });
+        } else if (b.ice) {
+          if (!c || !c.pc.remoteDescription) {
+            if (!c) {
+              c = this.makePc(from);
+            }
+            c.pendingIce.push(b.ice);
+          } else await c.pc.addIceCandidate(b.ice).catch(() => {
+          });
+        }
+      }
+      // A webinar viewer sends nothing; when the host lets them speak, their tracks go into the slots.
+      async setCanPublish(on) {
+        if (on === this.canPublish) return;
+        this.canPublish = on;
+        for (const c of this.pcs.values()) await this.fillSlots(c);
+      }
+      async setTrack(source, track) {
+        this.local[source] = track;
+        if (!this.canPublish) return;
+        const i = SOURCES.indexOf(source);
+        for (const c of this.pcs.values()) {
+          const t = c.pc.getTransceivers().slice().sort((a, b) => Number(a.mid) - Number(b.mid))[i];
+          if (t) {
+            await t.sender.replaceTrack(track ?? null).catch(() => {
+            });
+            if (track) this.tune(t.sender, source);
+          }
+        }
+      }
+      drop(peer, c) {
+        for (const source of c.tracks.keys()) this.onTrackGone?.({ peer, source });
+        c.pc.close();
+        this.pcs.delete(peer);
+      }
+      async stats() {
+        const out = {};
+        for (const [peer, c] of this.pcs) {
+          const r = await c.pc.getStats();
+          let rtt = null, inBytes = 0, outBytes = 0, relay = false;
+          r.forEach((s) => {
+            if (s.type === "candidate-pair" && s.nominated && s.state === "succeeded") {
+              rtt = s.currentRoundTripTime;
+              const lc = r.get(s.localCandidateId);
+              relay = lc?.candidateType === "relay";
+            }
+            if (s.type === "inbound-rtp") inBytes += s.bytesReceived ?? 0;
+            if (s.type === "outbound-rtp") outBytes += s.bytesSent ?? 0;
+          });
+          out[peer] = { state: c.state, rtt, inBytes, outBytes, relay };
+        }
+        return out;
+      }
+      async stop() {
+        for (const [p, c] of this.pcs) this.drop(p, c);
+        const list = this.signal.handlers.get("p2p");
+        if (list) list.splice(list.indexOf(this.handler), 1);
+      }
+    };
+  }
+});
+
+// meet-stub:./media/sfu.mjs
+var sfu_exports = {};
+__export(sfu_exports, {
+  LiveKitEngine: () => LiveKitEngine,
+  SfuEngine: () => SfuEngine
+});
+var no, SfuEngine, LiveKitEngine;
+var init_sfu = __esm({
+  "meet-stub:./media/sfu.mjs"() {
+    no = () => {
+      throw new Error("Calls of more than 4 people are not available inside wOS yet. Open the Meetings site for bigger calls.");
+    };
+    SfuEngine = class {
+      constructor() {
+        no();
+      }
+    };
+    LiveKitEngine = class {
+      constructor() {
+        no();
+      }
+    };
+  }
+});
+
+// meet-stub:./media/livekit.mjs
+var livekit_exports = {};
+__export(livekit_exports, {
+  LiveKitEngine: () => LiveKitEngine2,
+  SfuEngine: () => SfuEngine2
+});
+var no2, SfuEngine2, LiveKitEngine2;
+var init_livekit = __esm({
+  "meet-stub:./media/livekit.mjs"() {
+    no2 = () => {
+      throw new Error("Calls of more than 4 people are not available inside wOS yet. Open the Meetings site for bigger calls.");
+    };
+    SfuEngine2 = class {
+      constructor() {
+        no2();
+      }
+    };
+    LiveKitEngine2 = class {
+      constructor() {
+        no2();
+      }
+    };
+  }
+});
+
+// public/app/call.mjs
+var call_exports = {};
+__export(call_exports, {
+  Call: () => Call,
+  VIEWER_DELAY_MS: () => VIEWER_DELAY_MS
+});
+function modeLabel(plan, engine) {
+  if (!plan) return "Connecting\u2026";
+  if (plan.mode === "p2p") return "Direct connection";
+  if (plan.mode === "capped") return engine ? "Direct connection" : "Call is full";
+  if (plan.mode === "hosts") return `Carried by ${plan.hosts.length} ${plan.hosts.length === 1 ? "computer" : "computers"} \xB7 encrypted`;
+  if (plan.mode === "livekit") return "Media server";
+  return "";
+}
+var SPEAK_LEVEL, VIEWER_DELAY_MS, Call, linkify;
+var init_call = __esm({
+  "public/app/call.mjs"() {
+    init_api();
+    init_signal();
+    init_dom();
+    SPEAK_LEVEL = 0.03;
+    VIEWER_DELAY_MS = 2e3;
+    Call = class {
+      constructor({ root, meeting, participant, media, local, prefs, onExit }) {
+        Object.assign(this, { root, meeting, me: participant, media, onExit });
+        this.local = { mic: local.mic ?? null, cam: local.cam ?? null, screen: null };
+        this.audioOn = !!prefs.audio && !!this.local.mic;
+        this.videoOn = !!prefs.video && !!this.local.cam;
+        this.people = [];
+        this.waiting = 0;
+        this.remote = /* @__PURE__ */ new Map();
+        this.levels = /* @__PURE__ */ new Map();
+        this.peerTrouble = /* @__PURE__ */ new Map();
+        this.layout = participant.layout ?? "grid";
+        this.panel = null;
+        this.chat = [];
+        this.chatSeen = 0;
+        this.requests = [];
+        this.tiles = /* @__PURE__ */ new Map();
+        this.audios = /* @__PURE__ */ new Map();
+        this.timings = { t0: performance.now() };
+      }
+      // ------------------------------------------------------------ start and stop
+      async start() {
+        this.renderFrame();
+        if (this.local.mic) this.local.mic.enabled = this.audioOn;
+        if (!this.videoOn && this.local.cam) {
+          this.local.cam.stop();
+          this.local.cam = null;
+        }
+        callTool("meet.set_my_media", { meeting: this.meeting.id, audio: this.audioOn, video: this.videoOn }).catch(() => {
+        });
+        const j = await mediaJoin({ ticket: getTicket() });
+        this.peer = j.peer;
+        this.signal = new Signal({ media: getMediaBase(), token: j.token, cursor: j.cursor, ws: j.ws, onGone: () => this.gone(), onState: (s) => {
+          this.signalMode = s;
+        } });
+        this.signal.on("plan", (p) => this.applyPlan(p));
+        this.signal.on("changed", (b) => this.onChanged(b));
+        this.signal.on("cmd", (b) => this.onCmd(b));
+        this.signal.on("ended", (b) => this.exit(`The meeting was ended by ${b?.by ?? "the host"}.`, true));
+        this.signal.on("peer-left", (b) => {
+          this.peerTrouble.delete(b.peer);
+          this.render();
+        });
+        this.signal.start();
+        if (j.plan) await this.applyPlan(j.plan);
+        await Promise.all([this.loadPeople(), this.loadChat(), this.loadStatus()]);
+        this.levelT = setInterval(() => this.pollLevels(), 250);
+        this.statT = setInterval(() => this.refreshTrouble(), 3e3);
+        window.addEventListener("pagehide", this.onHide = () => {
+          navigator.sendBeacon?.(`${getMediaBase()}/leave?token=` + encodeURIComponent(j.token));
+        });
+        this.timings.joined = performance.now();
+      }
+      async stopMedia() {
+        clearInterval(this.levelT);
+        clearInterval(this.statT);
+        if (this.onHide) window.removeEventListener("pagehide", this.onHide);
+        this.ro?.disconnect();
+        await this.engine?.stop().catch(() => {
+        });
+        this.engine = null;
+        for (const t of [this.local.mic, this.local.cam, this.local.screen]) t?.stop();
+        for (const a of this.audios.values()) {
+          a.srcObject = null;
+          a.remove();
+        }
+        this.signal?.close();
+        this.audioCtx?.close().catch(() => {
+        });
+      }
+      async leave() {
+        this.leaving = true;
+        await callTool("meet.leave", { meeting: this.meeting.id }).catch(() => {
+        });
+        await this.exit("You left the meeting.");
+      }
+      async exit(message) {
+        if (this.exited) return;
+        this.exited = true;
+        await this.stopMedia();
+        this.onExit?.(message);
+      }
+      gone() {
+        if (!this.exited) this.exit(this.removed ? "The host removed you from this meeting." : "You were disconnected from the call.");
+      }
+      // ------------------------------------------------------------ the plan and engines
+      async applyPlan(plan) {
+        if (!plan || this.plan && plan.version <= this.plan.version) return;
+        const before = Object.keys(this.plan?.peers ?? {}).sort().join();
+        this.plan = plan;
+        if (Object.keys(plan.peers ?? {}).sort().join() !== before) this.onChanged({ what: "participants" });
+        const mode = plan.mode;
+        let want = null;
+        if ((mode === "p2p" || mode === "capped") && plan.p2p.includes(this.peer)) want = "p2p";
+        else if (mode === "hosts" && plan.assign?.[this.peer]) want = "hosts";
+        else if (mode === "livekit") want = "livekit";
+        const canPublish = this.canPublish();
+        if (this.engine && this.engine.kind !== want) {
+          await this.engine.stop().catch(() => {
+          });
+          this.engine = null;
+          for (const k of [...this.remote.keys()]) this.trackGone(k);
+        }
+        if (want && !this.engine) {
+          const cbs = {
+            signal: this.signal,
+            me: this.peer,
+            local: { ...this.local, mic: this.audioOn ? this.local.mic : this.local.mic },
+            ice: this.media.ice_servers,
+            e2eeKey: this.media.e2ee_key,
+            canPublish,
+            onTrack: (x) => this.onTrack(x),
+            onTrackGone: (x) => this.trackGone(`${x.peer}:${x.source}`),
+            onPeerState: (peer, s, reason) => {
+              if (s === "failed") this.peerTrouble.set(peer, reason);
+              else this.peerTrouble.delete(peer);
+              this.render();
+            },
+            onEvent: (ev, d) => this.onEngineEvent(ev, d)
+          };
+          if (want === "p2p") {
+            const { P2PEngine: P2PEngine2 } = await Promise.resolve().then(() => (init_p2p(), p2p_exports));
+            this.engine = new P2PEngine2(cbs);
+          }
+          if (want === "hosts") {
+            const { SfuEngine: SfuEngine3 } = await Promise.resolve().then(() => (init_sfu(), sfu_exports));
+            this.engine = new SfuEngine3(cbs);
+          }
+          if (want === "livekit") {
+            const { LiveKitEngine: LiveKitEngine3 } = await Promise.resolve().then(() => (init_livekit(), livekit_exports));
+            this.engine = new LiveKitEngine3(cbs);
+          }
+        }
+        try {
+          const isViewer = (p) => this.meeting.kind === "webinar" && plan.peers?.[p]?.role === "viewer";
+          if (want === "p2p") await this.engine.update(plan.p2p.filter((p) => p === this.peer || !(isViewer(p) && isViewer(this.peer))));
+          else if (this.engine) await this.engine.update(plan);
+          this.engine?.setCanPublish?.(canPublish);
+        } catch (e) {
+          console.warn("[meet] media", e);
+          toast(e.message);
+        }
+        this.render();
+      }
+      canPublish() {
+        return !(this.meeting.kind === "webinar" && this.myRole() === "viewer");
+      }
+      myRole() {
+        return this.people.find((p) => p.id === this.me.id)?.role ?? this.me.role;
+      }
+      amHost() {
+        return ["host", "cohost"].includes(this.myRole());
+      }
+      onTrack({ peer, source, track, receiver }) {
+        const key = `${peer}:${source}`;
+        this.remote.set(key, { track, receiver });
+        this.applyDelay(receiver);
+        if (track.kind === "audio") {
+          let a = this.audios.get(peer);
+          if (!a) {
+            a = document.createElement("audio");
+            a.autoplay = true;
+            a.dataset.peer = peer;
+            this.root.querySelector("#audios").append(a);
+            this.audios.set(peer, a);
+          }
+          a.srcObject = new MediaStream([track]);
+          a.play().catch(() => this.needsTap());
+        }
+        track.onmute = track.onunmute = () => this.render();
+        if (!this.timings.firstRemote) this.timings.firstRemote = performance.now();
+        this.render();
+      }
+      trackGone(key) {
+        const x = this.remote.get(key);
+        this.remote.delete(key);
+        const [peer, source] = key.split(":");
+        if (source === "mic" && x?.track.kind === "audio") {
+          const a = this.audios.get(peer);
+          if (a) {
+            a.srcObject = null;
+            a.remove();
+            this.audios.delete(peer);
+          }
+        }
+        this.render();
+      }
+      isViewer() {
+        return this.meeting.kind === "webinar" && this.myRole() === "viewer";
+      }
+      applyDelay(receiver) {
+        if (!receiver || !("jitterBufferTarget" in receiver)) return;
+        try {
+          receiver.jitterBufferTarget = this.isViewer() ? VIEWER_DELAY_MS : null;
+        } catch {
+        }
+      }
+      // The host let me speak (or made me a viewer again): ask for the microphone and camera now, the first
+      // time (the browser asks the person), and start or stop sending.
+      async roleChanged() {
+        const can = this.canPublish();
+        for (const x of this.remote.values()) this.applyDelay(x.receiver);
+        if (can && !this.local.mic && !this.local.cam) {
+          try {
+            const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+            this.local.mic = st.getAudioTracks()[0] ?? null;
+            this.local.cam = st.getVideoTracks()[0] ?? null;
+          } catch {
+            toast("The browser blocked the microphone or camera. Allow them with the icon in the address bar.");
+          }
+          this.audioOn = !!this.local.mic;
+          this.videoOn = !!this.local.cam;
+          for (const src of ["mic", "cam"]) if (this.local[src]) await this.engine?.setTrack(src, this.local[src]);
+          callTool("meet.set_my_media", { meeting: this.meeting.id, audio: this.audioOn, video: this.videoOn }).catch(() => {
+          });
+        }
+        await this.engine?.setCanPublish?.(can);
+        if (this.meeting.kind === "webinar") toast(can ? "The host let you speak. Your microphone is on." : "You are watching again.");
+        this.render();
+      }
+      needsTap() {
+        if (this.tapShown) return;
+        this.tapShown = true;
+        const n = document.createElement("button");
+        n.className = "ui-btn is-accent meet-tap";
+        n.dataset.tool = "none";
+        n.dataset.why = "lets the browser play sound; browsers need one tap first";
+        n.textContent = "Tap to hear the call";
+        n.onclick = () => {
+          for (const a of this.audios.values()) a.play().catch(() => {
+          });
+          n.remove();
+        };
+        this.root.querySelector(".meet-stage").append(n);
+      }
+      onEngineEvent(ev, d) {
+        if (ev === "levels") {
+          const t = Date.now();
+          for (const x of d ?? []) {
+            const pid = this.plan?.peers?.[x.owner]?.pid;
+            if (pid) this.levels.set(pid, { level: 0.2, at: t });
+          }
+        }
+        if (ev === "failover") {
+          this.lastFailover = d;
+        }
+        if (ev === "host-lost") toast("A computer carrying the call left. Moving you to another one.");
+        if (ev === "disconnected") toast("Lost the media server. Reconnecting\u2026");
+      }
+      // ------------------------------------------------------------ data from tools
+      async loadPeople() {
+        try {
+          const r = await callTool("meet.list_participants", { meeting: this.meeting.id });
+          this.people = r.participants;
+          const before = this.waiting;
+          this.waiting = r.waiting;
+          if (this.amHost() && this.waiting > before) {
+            const w = await callTool("meet.list_waiting", { meeting: this.meeting.id }).catch(() => ({ waiting: [] }));
+            this.waitingList = w.waiting;
+            const last = w.waiting.at(-1);
+            if (last) toast(`${last.display_name} is waiting to join`);
+          } else if (this.amHost() && this.waiting) {
+            this.waitingList = (await callTool("meet.list_waiting", { meeting: this.meeting.id }).catch(() => ({ waiting: [] }))).waiting;
+          } else this.waitingList = [];
+          const mine = this.people.find((p) => p.id === this.me.id);
+          if (mine && this.lastRole && mine.role !== this.lastRole) this.roleChanged();
+          if (mine) this.lastRole = mine.role;
+          const hands = new Set(this.people.filter((p) => p.hand_raised && p.id !== this.me.id).map((p) => p.id));
+          if (this.amHost()) {
+            for (const id of hands) if (!this.hands?.has(id)) toast(`${this.people.find((p) => p.id === id).display_name} raised their hand`);
+          }
+          this.hands = hands;
+        } catch (e) {
+          if (e.code === "forbidden") return this.exit("You are no longer in this meeting.");
+        }
+        this.render();
+      }
+      async loadChat() {
+        const after = this.chat.at(-1)?.id ?? 0;
+        const r = await callTool("meet.list_chat", { meeting: this.meeting.id, after }).catch(() => ({ messages: [] }));
+        if (!r.messages.length) return;
+        this.chat.push(...r.messages);
+        if (this.panel === "chat") this.chatSeen = this.chat.length;
+        else if (r.messages.some((m) => m.participant !== this.me.id)) toast(`${r.messages.at(-1).name}: ${r.messages.at(-1).body.slice(0, 80)}`);
+        this.render();
+      }
+      async loadStatus() {
+        const s = await callTool("meet.room_status", { meeting: this.meeting.id }).catch(() => null);
+        if (!s) return;
+        this.status = s;
+        this.meeting = { ...this.meeting, ...s.meeting };
+        this.requests = s.requests ?? [];
+        this.render();
+      }
+      onChanged(b) {
+        if (this.leaving || this.exited) return;
+        clearTimeout(this.chT?.[b.what]);
+        this.chT ??= {};
+        this.chT[b.what] = setTimeout(() => {
+          if (b.what === "participants" || b.what === "waiting") this.loadPeople();
+          if (b.what === "chat") this.loadChat();
+          if (b.what === "meeting") this.loadStatus();
+        }, 60);
+      }
+      async onCmd(b) {
+        if (b.to_pid !== this.me.id) return;
+        if (b.removed) {
+          this.removed = true;
+          return this.exit("The host removed you from this meeting.");
+        }
+        if (b.set_media) {
+          if (b.set_media.audio === false && this.audioOn) {
+            this.setMic(false, true);
+            if (b.by) toast(`${b.by} muted you`);
+          }
+          if (b.set_media.audio === true && !this.audioOn) this.setMic(true, true);
+          if (b.set_media.video === false && this.videoOn) this.setCam(false, true);
+          if (b.set_media.video === true && !this.videoOn) this.setCam(true, true);
+        }
+        if (b.request?.kind === "screen_share") {
+          this.requests = [...this.requests.filter((r) => r.id !== b.request.id), b.request];
+          this.render();
+        }
+        if (b.stop_share && this.local.screen) this.stopShare(true);
+        if (b.layout && b.layout !== this.layout) {
+          this.layout = b.layout;
+          this.render();
+        }
+      }
+      // ------------------------------------------------------------ my media
+      async setMic(on, fromServer = false) {
+        if (on && !this.local.mic) {
+          try {
+            const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+            this.local.mic = s.getAudioTracks()[0];
+            await this.engine?.setTrack("mic", this.local.mic);
+          } catch {
+            toast("The browser blocked the microphone. Allow it with the icon in the address bar.");
+            return;
+          }
+        }
+        this.audioOn = on;
+        if (this.local.mic) this.local.mic.enabled = on;
+        if (!fromServer) await callTool("meet.set_my_media", { meeting: this.meeting.id, audio: on }).catch((e) => toast(e.message));
+        this.render();
+      }
+      async setCam(on, fromServer = false) {
+        if (on && !this.local.cam) {
+          try {
+            const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } } });
+            this.local.cam = s.getVideoTracks()[0];
+          } catch {
+            toast("The browser blocked the camera, or it is busy.");
+            return;
+          }
+          await this.engine?.setTrack("cam", this.local.cam);
+        }
+        if (!on && this.local.cam) {
+          this.local.cam.stop();
+          this.local.cam = null;
+          await this.engine?.setTrack("cam", null);
+        }
+        this.videoOn = on;
+        if (!fromServer) await callTool("meet.set_my_media", { meeting: this.meeting.id, video: on }).catch((e) => toast(e.message));
+        this.render();
+      }
+      // Choosing a screen is the browser's picker, which only the person can use (ROADMAP 3.3).
+      async startShare() {
+        let s;
+        try {
+          s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15 } }, audio: false });
+        } catch {
+          return;
+        }
+        const t = s.getVideoTracks()[0];
+        t.contentHint = "detail";
+        this.local.screen = t;
+        t.onended = () => this.stopShare();
+        await this.engine?.setTrack("screen", t);
+        this.requests = this.requests.filter((r) => r.kind !== "screen_share");
+        await callTool("meet.set_sharing", { meeting: this.meeting.id, sharing: true }).catch((e) => toast(e.message));
+        this.render();
+      }
+      async stopShare(fromServer = false) {
+        const t = this.local.screen;
+        this.local.screen = null;
+        t?.stop();
+        await this.engine?.setTrack("screen", null);
+        if (!fromServer) await callTool("meet.set_sharing", { meeting: this.meeting.id, sharing: false }).catch(() => {
+        });
+        this.render();
+      }
+      // ------------------------------------------------------------ who is speaking
+      async pollLevels() {
+        const t = Date.now();
+        if (this.local.mic && this.audioOn) {
+          if (!this.analyser || this.analyserTrack !== this.local.mic) {
+            try {
+              this.audioCtx ??= new AudioContext();
+              const src = this.audioCtx.createMediaStreamSource(new MediaStream([this.local.mic]));
+              this.analyser = this.audioCtx.createAnalyser();
+              this.analyser.fftSize = 512;
+              src.connect(this.analyser);
+              this.analyserTrack = this.local.mic;
+              this.buf = new Float32Array(512);
+            } catch {
+            }
+          }
+          if (this.analyser) {
+            this.analyser.getFloatTimeDomainData(this.buf);
+            let sum = 0;
+            for (const v of this.buf) sum += v * v;
+            const rms = Math.sqrt(sum / this.buf.length);
+            if (rms > SPEAK_LEVEL) this.levels.set(this.me.id, { level: rms, at: t });
+          }
+        }
+        for (const [key2, x] of this.remote) {
+          if (!key2.endsWith(":mic") || !x.receiver?.getSynchronizationSources) continue;
+          const lvl = x.receiver.getSynchronizationSources()[0]?.audioLevel ?? 0;
+          const pid = this.plan?.peers?.[key2.split(":")[0]]?.pid;
+          if (pid && lvl > SPEAK_LEVEL) this.levels.set(pid, { level: lvl, at: t });
+        }
+        const speaking = new Set([...this.levels].filter(([, v]) => t - v.at < 700).map(([pid]) => pid));
+        let loudest = null;
+        for (const [pid, v] of this.levels) if (t - v.at < 700 && (!loudest || v.level > loudest.level)) loudest = { pid, level: v.level };
+        if (loudest && loudest.pid !== this.me.id && loudest.pid !== this.active) {
+          if (this.candidate?.pid === loudest.pid) {
+            if (t - this.candidate.since > 800) {
+              this.active = loudest.pid;
+              this.candidate = null;
+            }
+          } else this.candidate = { pid: loudest.pid, since: t };
+        }
+        const key = [...speaking].sort().join(",") + "|" + this.active;
+        if (key !== this.speakingKey) {
+          this.speakingKey = key;
+          this.speaking = speaking;
+          this.render();
+        }
+      }
+      async refreshTrouble() {
+        if (this.engine?.kind !== "p2p") return;
+        this.render();
+      }
+      // ------------------------------------------------------------ rendering
+      renderFrame() {
+        this.root.innerHTML = `<div class="meet-call" data-panel="">
+      <header class="meet-call-top"><div class="meet-call-t"><b>${esc(this.meeting.title)}</b><span class="ui-mute meet-mode" id="mode"></span></div><div class="meet-call-tr" id="topr"></div></header>
+      <div class="meet-notices" id="notices"></div>
+      <div class="meet-body">
+        <section class="meet-stage" id="stage" aria-label="Call"></section>
+        <aside class="meet-side" id="side" aria-label="Side panel"></aside>
+      </div>
+      <nav class="ui-callbar meet-bar" id="bar" aria-label="Call controls"></nav>
+      <div id="audios" hidden></div>
+    </div>`;
+        this.root.removeAttribute("aria-busy");
+        this.root.querySelector("#bar").addEventListener("click", (e) => this.onBar(e));
+        this.root.querySelector("#side").addEventListener("click", (e) => this.onSide(e));
+        this.root.querySelector("#side").addEventListener("submit", (e) => this.onSideSubmit(e));
+        this.root.querySelector("#notices").addEventListener("click", (e) => this.onNotice(e));
+      }
+      render() {
+        if (this.exited || !this.root.querySelector(".meet-call")) return;
+        cancelAnimationFrame(this.raf);
+        this.raf = requestAnimationFrame(() => this.renderNow());
+      }
+      renderNow() {
+        const root = this.root.querySelector(".meet-call");
+        if (!root || this.exited) return;
+        root.dataset.panel = this.panel ?? "";
+        root.dataset.layout = this.layout;
+        this.root.querySelector("#mode").textContent = modeLabel(this.plan, this.engine);
+        this.renderNotices();
+        this.renderStage();
+        this.renderBar();
+        this.renderSide();
+      }
+      peersOf(pid) {
+        return Object.entries(this.plan?.peers ?? {}).filter(([, v]) => v.pid === pid && v.kind === "browser").map(([k]) => k);
+      }
+      remoteFor(pid, source) {
+        for (const peer of this.peersOf(pid)) {
+          const x = this.remote.get(`${peer}:${source}`);
+          if (x) return x.track;
+        }
+        return null;
+      }
+      // What tiles to show: everyone in the call; a shared screen gets its own tile.
+      tileList() {
+        const inCall = this.people.filter((p) => p.id === this.me.id || p.in_call);
+        const list = [];
+        for (const p of inCall) {
+          const mine = p.id === this.me.id;
+          const cam = mine ? this.videoOn ? this.local.cam : null : p.video_on ? this.remoteFor(p.id, "cam") : null;
+          if (this.meeting.kind === "webinar" && p.role === "viewer") continue;
+          list.push({ key: `${p.id}:cam`, pid: p.id, p, track: cam, mine, audio: mine ? this.audioOn : p.audio_on });
+          const scr = mine ? this.local.screen : p.sharing ? this.remoteFor(p.id, "screen") : null;
+          if (scr) list.push({ key: `${p.id}:screen`, pid: p.id, p, track: scr, mine, screen: true });
+        }
+        return list;
+      }
+      renderStage() {
+        const stage = this.root.querySelector("#stage");
+        const list = this.tileList();
+        const screen = list.find((t) => t.screen);
+        const big = this.layout === "speaker" || screen ? screen ?? list.find((t) => t.pid === this.active && !t.mine) ?? list.find((t) => !t.mine) ?? list[0] : null;
+        let main = stage.querySelector(".meet-main");
+        let grid = stage.querySelector(".ui-calls");
+        if (!grid) {
+          stage.innerHTML = '<div class="meet-main"></div><div class="ui-calls"></div>';
+          main = stage.querySelector(".meet-main");
+          grid = stage.querySelector(".ui-calls");
+        }
+        stage.classList.toggle("has-big", !!big);
+        grid.classList.toggle("is-strip", !!big);
+        grid.dataset.n = String(list.length - (big ? 1 : 0));
+        const keep = /* @__PURE__ */ new Set();
+        for (const t of list) {
+          keep.add(t.key);
+          let el = this.tiles.get(t.key);
+          if (!el) {
+            el = this.makeTile(t);
+            this.tiles.set(t.key, el);
+          }
+          this.updateTile(el, t);
+          const parent = t === big ? main : grid;
+          if (el.parentElement !== parent) parent.append(el);
+        }
+        for (const [k, el] of this.tiles) if (!keep.has(k)) {
+          el.querySelector("video").srcObject = null;
+          el.remove();
+          this.tiles.delete(k);
+        }
+        for (const t of list) {
+          const el = this.tiles.get(t.key);
+          if (el.parentElement === grid) grid.append(el);
+        }
+        this.fit();
+        const owners = (pred) => list.filter(pred).flatMap((t) => this.peersOf(t.pid));
+        this.engine?.setView?.({ visible: owners((t) => !t.mine && t !== big), big: big && !big.mine ? this.peersOf(big.pid)[0] ?? null : null });
+      }
+      // Size the grid so tiles are as large as the stage allows: try each column count, keep the biggest tile.
+      fit() {
+        const grid = this.root.querySelector("#stage .ui-calls");
+        if (!grid) return;
+        if (!this.ro) {
+          this.ro = new ResizeObserver(() => this.fit());
+          this.ro.observe(this.root.querySelector("#stage"));
+        }
+        const n = grid.children.length;
+        if (grid.classList.contains("is-strip") || !n) {
+          grid.style.gridTemplateColumns = "";
+          return;
+        }
+        const cs = getComputedStyle(grid);
+        const W = grid.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const H = grid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+        const gap = parseFloat(cs.columnGap) || 8;
+        const [a, b] = (getComputedStyle(grid.children[0]).aspectRatio || "16 / 10").split("/").map(Number);
+        const ratio = a && b ? a / b : 1.6;
+        let best = { w: 0, cols: 1 };
+        for (let cols = 1; cols <= n; cols++) {
+          const rows = Math.ceil(n / cols);
+          const w = Math.min((W - gap * (cols - 1)) / cols, (H - gap * (rows - 1)) / rows * ratio);
+          if (w > best.w) best = { w, cols };
+        }
+        const tw = Math.max(80, Math.floor(best.w));
+        const v = `repeat(${best.cols}, ${tw}px)`;
+        if (grid.style.gridTemplateColumns !== v) grid.style.gridTemplateColumns = v;
+      }
+      makeTile(t) {
+        const el = document.createElement("div");
+        el.className = "ui-tile";
+        el.dataset.key = t.key;
+        el.innerHTML = `<video autoplay playsinline muted></video><span class="ui-avatar">${esc(initials(t.p.display_name))}</span><span class="ui-tile-n"></span><span class="ui-tile-tag"></span>`;
+        return el;
+      }
+      updateTile(el, t) {
+        const v = el.querySelector("video");
+        const live = t.track && t.track.readyState === "live" && (t.mine || !t.track.muted);
+        if (live && v.srcObject?.getVideoTracks()[0] !== t.track) {
+          v.srcObject = new MediaStream([t.track]);
+          v.play().catch(() => {
+          });
+        }
+        if (!live && v.srcObject) v.srcObject = null;
+        el.classList.toggle("has-video", !!live);
+        el.classList.toggle("is-mine", t.mine && !t.screen);
+        el.classList.toggle("is-screen", !!t.screen);
+        el.classList.toggle("is-muted", !t.screen && !t.audio);
+        el.classList.toggle("is-agent", t.p.kind === "agent");
+        el.classList.toggle("is-speaking", !t.screen && !!this.speaking?.has(t.pid));
+        const trouble = !t.mine && this.peersOf(t.pid).some((pr) => this.peerTrouble.has(pr));
+        el.classList.toggle("is-trouble", trouble);
+        const name = t.screen ? `${t.mine ? "Your" : `${t.p.display_name}'s`} screen` : `${t.p.display_name}${t.mine ? " (you)" : ""}`;
+        const n = el.querySelector(".ui-tile-n");
+        if (n.textContent !== name) n.textContent = name;
+        const tag = el.querySelector(".ui-tile-tag");
+        const tagHtml = trouble ? `<span class="ui-chip is-bad">Can't connect</span>` : t.p.hand_raised && !t.screen ? `<span class="ui-chip is-soft">${icon("hand", 13)} Hand up</span>` : t.p.kind === "agent" ? '<span class="ui-chip is-soft">Agent</span>' : "";
+        if (tag.innerHTML !== tagHtml) tag.innerHTML = tagHtml;
+      }
+      renderNotices() {
+        const out = [];
+        const p = this.plan;
+        if (this.isViewer()) out.push(`<div class="ui-notice is-quiet"><span>You are watching${this.meeting.kind === "webinar" ? " a webinar" : ""}. Raise your hand to ask to speak.</span></div>`);
+        if (p && p.capped?.includes(this.peer)) out.push(`<div class="ui-notice"><span>${esc(p.message ?? "This call is full.")}</span></div>`);
+        else if (p?.message && this.amHost()) out.push(`<div class="ui-notice is-quiet"><span>${esc(p.message)}</span></div>`);
+        if (this.peerTrouble.size) {
+          const names = [...this.peerTrouble.keys()].map((pr) => p?.peers?.[pr]?.name).filter(Boolean);
+          const reason = [...this.peerTrouble.values()][0];
+          out.push(`<div class="ui-notice is-quiet"><span>Can't connect to ${esc(names.join(", ") || "someone")}. ${esc(reason ?? "")}</span></div>`);
+        }
+        for (const r of this.requests.filter((x) => x.kind === "screen_share")) {
+          if (this.local.screen) continue;
+          out.push(`<div class="ui-notice"><span>${esc(r.body?.by ?? "The host")} asked you to share your screen. You pick what to share.</span><button class="ui-btn is-accent is-sm" data-tool="meet.set_sharing" data-act="share">Share screen</button><button class="ui-btn is-ghost is-sm" data-tool="none" data-why="hides the request on this screen" data-act="dismiss" data-id="${esc(r.id)}">Not now</button></div>`);
+        }
+        if (this.amHost() && this.waiting && this.panel !== "people") out.push(`<div class="ui-notice is-quiet"><span>${this.waiting} waiting to join.</span><button class="ui-btn is-sm" data-tool="meet.admit" data-act="admit-all">Let everyone in</button><button class="ui-btn is-ghost is-sm" data-tool="none" data-why="opens the people panel" data-act="see-waiting">See who</button></div>`);
+        const html = out.join("");
+        const el = this.root.querySelector("#notices");
+        if (el.innerHTML !== html) el.innerHTML = html;
+      }
+      renderBar() {
+        const me = this.people.find((p) => p.id === this.me.id);
+        const hand = !!me?.hand_raised;
+        const canPub = this.canPublish();
+        const unread = Math.max(0, this.chat.length - this.chatSeen);
+        const b = (act, tool, pressed, label, ic, extra = "") => `<button data-act="${act}" ${tool === "none" ? `data-tool="none" data-why="${esc(extra)}"` : `data-tool="${tool}"`} ${pressed == null ? "" : `aria-pressed="${pressed}"`} aria-label="${esc(label)}" title="${esc(label)}">${ic}</button>`;
+        const html = [
+          canPub ? b("mic", "meet.set_my_media", this.audioOn, this.audioOn ? "Mute" : "Unmute", icon(this.audioOn ? "mic" : "mic-off")) : "",
+          canPub ? b("cam", "meet.set_my_media", this.videoOn, this.videoOn ? "Turn camera off" : "Turn camera on", icon(this.videoOn ? "cam" : "cam-off")) : "",
+          canPub && navigator.mediaDevices?.getDisplayMedia ? b("share", "meet.set_sharing", this.local.screen ? true : null, this.local.screen ? "Stop sharing" : "Share screen", icon("screen")).replace("<button", `<button class="${this.local.screen ? "is-on" : ""}"`) : "",
+          b("hand", "meet.raise_hand", hand ? true : null, hand ? "Lower hand" : "Raise hand", icon("hand")).replace("<button", `<button class="${hand ? "is-on" : ""}"`),
+          b("layout", "meet.set_layout", null, this.layout === "grid" ? "Speaker view" : "Grid view", icon(this.layout === "grid" ? "speaker" : "grid")),
+          `<span class="meet-bar-sep" aria-hidden="true"></span>`,
+          b("people", "none", null, "People", `${icon("people")}${this.amHost() && this.waiting ? `<span class="meet-dot">${this.waiting}</span>` : ""}`, "opens the people panel"),
+          b("chat", "none", null, "Chat", `${icon("chat")}${unread && this.panel !== "chat" ? `<span class="meet-dot">${unread}</span>` : ""}`, "opens the chat panel"),
+          b("info", "none", null, "Call details", icon("info"), "opens call details"),
+          `<button class="is-leave" data-act="leave" data-tool="meet.leave">Leave</button>`
+        ].join("");
+        const bar = this.root.querySelector("#bar");
+        if (bar.innerHTML !== html) bar.innerHTML = html;
+      }
+      renderSide() {
+        const side = this.root.querySelector("#side");
+        if (!this.panel) {
+          if (side.innerHTML) side.innerHTML = "";
+          return;
+        }
+        const tab = (k, label) => `<button role="tab" aria-selected="${this.panel === k}" data-tool="none" data-why="switches the side panel" data-panel="${k}">${label}</button>`;
+        const head = `<div class="meet-side-h"><div class="ui-tabs" role="tablist">${tab("people", `People <span class="ui-badge is-quiet">${this.people.filter((p) => p.in_call || p.id === this.me.id).length}</span>`)}${tab("chat", "Chat")}${tab("info", "Details")}</div><button class="ui-x" data-tool="none" data-why="closes the side panel" data-act="close" aria-label="Close">\xD7</button></div>`;
+        let body = "";
+        if (this.panel === "people") body = this.peopleHtml();
+        if (this.panel === "chat") body = this.chatHtml();
+        if (this.panel === "info") body = this.infoHtml();
+        const html = head + `<div class="meet-side-b">${body}</div>`;
+        if (side.dataset.html === html) return;
+        const draft = side.querySelector("#chatbox")?.value;
+        const focused = document.activeElement?.id === "chatbox";
+        side.innerHTML = html;
+        side.dataset.html = html;
+        const box = side.querySelector("#chatbox");
+        if (box && draft) box.value = draft;
+        if (box && focused) box.focus();
+        const list = side.querySelector(".meet-chatlist");
+        if (list) list.scrollTop = list.scrollHeight;
+      }
+      peopleHtml() {
+        const host = this.amHost();
+        const webinar = this.meeting.kind === "webinar";
+        const row = (p) => {
+          const mine = p.id === this.me.id;
+          const chips = [p.role === "host" ? "Host" : p.role === "cohost" ? "Co-host" : webinar && p.role === "speaker" ? "Speaker" : webinar && p.role === "viewer" ? "Viewer" : "", p.is_guest && !webinar ? "Guest" : "", p.kind === "agent" ? "Agent" : "", !p.in_call && !mine ? "Not connected" : ""].filter(Boolean);
+          const acts = host && !mine && p.role !== "host" ? `<div class="meet-prow-a ${webinar && p.hand_raised ? "is-on" : ""}">
+        ${p.audio_on ? `<button class="ui-btn is-ghost is-sm" data-tool="meet.mute_participant" data-act="mute" data-pid="${p.id}">Mute</button>` : ""}
+        ${webinar ? p.role === "viewer" ? `<button class="ui-btn is-ghost is-sm" data-tool="meet.set_role" data-act="role" data-role="speaker" data-pid="${p.id}">Let speak</button>` : `<button class="ui-btn is-ghost is-sm" data-tool="meet.set_role" data-act="role" data-role="viewer" data-pid="${p.id}">Make viewer</button>` : `<button class="ui-btn is-ghost is-sm" data-tool="meet.set_role" data-act="role" data-role="${p.role === "cohost" ? p.is_guest ? "guest" : "member" : "cohost"}" data-pid="${p.id}">${p.role === "cohost" ? "Remove co-host" : "Make co-host"}</button>`}
+        <button class="ui-btn is-ghost is-sm" data-tool="meet.request_screen_share" data-act="ask-share" data-pid="${p.id}">Ask to share</button>
+        <button class="ui-btn is-ghost is-sm is-danger" data-tool="meet.remove_participant" data-act="remove" data-pid="${p.id}">Remove</button>
+      </div>` : "";
+          return `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(p.display_name))}</span><div class="meet-prow-m"><span>${esc(p.display_name)}${mine ? " (you)" : ""}</span><span class="meet-prow-c">${chips.map((c) => `<span class="ui-chip is-outline">${c}</span>`).join("")}${p.hand_raised ? `<span class="ui-chip is-soft">${icon("hand", 12)} Hand up</span>` : ""}</span></div><span class="meet-prow-i ${p.audio_on ? "" : "is-off"}" title="${p.audio_on ? "Mic on" : "Muted"}">${icon(p.audio_on ? "mic" : "mic-off", 16)}</span>${acts}</li>`;
+        };
+        const waiting = host && this.waitingList?.length ? `<h3 class="meet-side-sub">Waiting <span class="ui-badge">${this.waitingList.length}</span></h3><ul class="meet-plist">${this.waitingList.map((w) => `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(w.display_name))}</span><div class="meet-prow-m"><span>${esc(w.display_name)}</span><span class="meet-prow-c">${w.is_guest ? '<span class="ui-chip is-outline">Guest</span>' : ""}</span></div><div class="meet-prow-a is-on"><button class="ui-btn is-sm" data-tool="meet.admit" data-act="admit" data-pid="${w.id}">Let in</button><button class="ui-btn is-ghost is-sm" data-tool="meet.deny" data-act="deny" data-pid="${w.id}">Deny</button></div></li>`).join("")}</ul><p><button class="ui-btn is-quiet is-sm" data-tool="meet.admit" data-act="admit-all">Let everyone in</button></p>` : "";
+        const rank = (p) => !webinar ? 0 : p.role !== "viewer" ? 0 : p.hand_raised ? 1 : 2;
+        const inCall = this.people.filter((p) => p.in_call || p.id === this.me.id).sort((a, b) => rank(a) - rank(b));
+        const away = this.people.filter((p) => !p.in_call && p.id !== this.me.id);
+        const all = host ? `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.mute_participant" data-act="mute-all">Mute everyone</button><button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button></p>` : `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button></p>`;
+        return `${waiting}${all}<h3 class="meet-side-sub">In the call</h3><ul class="meet-plist">${inCall.map(row).join("")}</ul>${away.length ? `<h3 class="meet-side-sub">Joined earlier</h3><ul class="meet-plist">${away.map(row).join("")}</ul>` : ""}`;
+      }
+      chatHtml() {
+        const msgs = this.chat.map((m) => `<li class="meet-cmsg ${m.participant === this.me.id ? "is-mine" : ""}"><span class="meet-cmsg-h"><b>${esc(m.name)}</b> <span class="ui-mute">${new Date(m.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></span><span class="meet-cmsg-b">${linkify(esc(m.body))}</span></li>`).join("");
+        return `<ul class="meet-chatlist">${msgs || '<li class="ui-empty">Messages here are seen by everyone in the call.</li>'}</ul>
+      <form class="ui-composer meet-composer" data-tool="meet.send_chat" id="chatform"><label class="ui-sr" for="chatbox">Message</label><input id="chatbox" name="body" autocomplete="off" placeholder="Message everyone" maxlength="4000"><button class="ui-btn is-accent is-sm" type="submit" data-tool="meet.send_chat">Send</button></form>`;
+      }
+      infoHtml() {
+        const s = this.status;
+        const host = this.amHost();
+        const m = this.meeting;
+        const hosts = (s?.hosts ?? []).map((h) => `<li>${icon("computer", 16)} ${esc(h.name)}: ${h.carrying ? `carrying ${h.load ?? 0} of about ${h.capacity ?? "?"} people` : esc(h.status)}${h.upload_mbps ? `, ${h.upload_mbps} Mbit/s up` : ""}</li>`).join("");
+        return `<dl class="ui-kv meet-kv">
+        <dt>Link</dt><dd class="meet-link"><code>${esc(m.join_url)}</code></dd>
+        <dt>Carried</dt><dd>${esc(s?.summary ?? modeLabel(this.plan, this.engine))}</dd>
+        <dt>People</dt><dd>${s?.people_in_call ?? ""} in the call${s?.limit ? `, room for about ${s.limit}` : ""}</dd>
+        <dt>Waiting room</dt><dd>${m.waiting_room ? "On" : "Off"}</dd>
+        <dt>Locked</dt><dd>${m.locked ? "Yes, nobody new can join" : "No"}</dd>
+        <dt>Recording</dt><dd>Off. Recording is never on unless everyone is told and agrees.</dd>
+      </dl>
+      ${hosts ? `<h3 class="meet-side-sub">Computers carrying the call</h3><ul class="meet-hosts">${hosts}</ul>` : ""}
+      <div class="meet-side-a is-col">
+        <button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">${icon("link", 16)} Copy invite</button>
+        <button class="ui-btn is-quiet is-sm" data-tool="meet.add_host" data-act="add-host">${icon("computer", 16)} Help carry this call</button>
+        ${host ? `<button class="ui-btn is-quiet is-sm" data-tool="meet.lock" data-act="lock">${icon("lock", 16)} ${m.locked ? "Unlock meeting" : "Lock meeting"}</button>
+        <button class="ui-btn is-quiet is-sm" data-tool="meet.set_waiting_room" data-act="waiting-room">${m.waiting_room ? "Turn waiting room off" : "Turn waiting room on"}</button>
+        <button class="ui-btn is-quiet is-sm" data-tool="meet.update" data-act="webinar">${m.kind === "webinar" ? "Switch to a normal meeting" : "Switch to webinar mode"}</button>
+        <button class="ui-btn is-danger is-sm" data-tool="meet.end" data-act="end">End for everyone</button>` : ""}
+      </div>
+      <div id="hostcmd"></div>`;
+      }
+      // ------------------------------------------------------------ actions
+      async onBar(e) {
+        const b = e.target.closest("button[data-act]");
+        if (!b) return;
+        const a = b.dataset.act;
+        try {
+          if (a === "mic") await this.setMic(!this.audioOn);
+          if (a === "cam") await this.setCam(!this.videoOn);
+          if (a === "share") this.local.screen ? await this.stopShare() : await this.startShare();
+          if (a === "hand") {
+            const me = this.people.find((p) => p.id === this.me.id);
+            await callTool("meet.raise_hand", { meeting: this.meeting.id, raised: !me?.hand_raised });
+          }
+          if (a === "layout") {
+            this.layout = this.layout === "grid" ? "speaker" : "grid";
+            this.render();
+            await callTool("meet.set_layout", { meeting: this.meeting.id, layout: this.layout });
+          }
+          if (a === "people" || a === "chat" || a === "info") this.openPanel(this.panel === a ? null : a);
+          if (a === "leave") await this.leave();
+        } catch (err) {
+          toast(err.message);
+        }
+      }
+      openPanel(p) {
+        this.panel = p;
+        if (p === "chat") {
+          this.chatSeen = this.chat.length;
+          setTimeout(() => this.root.querySelector("#chatbox")?.focus(), 30);
+        }
+        if (p === "info") this.loadStatus();
+        if (p === "people") this.loadPeople();
+        this.render();
+      }
+      async onSide(e) {
+        const t = e.target.closest("[data-panel]");
+        if (t && t.tagName === "BUTTON") return this.openPanel(t.dataset.panel);
+        const b = e.target.closest("button[data-act]");
+        if (!b) return;
+        const a = b.dataset.act, pid = b.dataset.pid, mid = this.meeting.id;
+        try {
+          if (a === "close") return this.openPanel(null);
+          if (a === "admit") await callTool("meet.admit", { meeting: mid, participant: pid });
+          if (a === "admit-all") await callTool("meet.admit", { meeting: mid, all: true });
+          if (a === "deny") await callTool("meet.deny", { meeting: mid, participant: pid });
+          if (a === "mute") await callTool("meet.mute_participant", { meeting: mid, participant: pid });
+          if (a === "mute-all") {
+            await callTool("meet.mute_participant", { meeting: mid, all: true });
+            toast("Everyone else is muted");
+          }
+          if (a === "role") await callTool("meet.set_role", { meeting: mid, participant: pid, role: b.dataset.role });
+          if (a === "ask-share") {
+            await callTool("meet.request_screen_share", { meeting: mid, participant: pid });
+            toast("Asked. They pick what to share.");
+          }
+          if (a === "remove") await callTool("meet.remove_participant", { meeting: mid, participant: pid });
+          if (a === "invite") {
+            const r = await callTool("meet.invite", { meeting: mid });
+            await copyText(r.message);
+            toast("Invite copied");
+          }
+          if (a === "lock") await callTool("meet.lock", { meeting: mid, locked: !this.meeting.locked });
+          if (a === "waiting-room") await callTool("meet.set_waiting_room", { meeting: mid, on: !this.meeting.waiting_room });
+          if (a === "webinar") await callTool("meet.update", { meeting: mid, kind: this.meeting.kind === "webinar" ? "meeting" : "webinar" });
+          if (a === "end") {
+            await callTool("meet.end", { meeting: mid });
+            await this.exit("You ended the meeting for everyone.");
+          }
+          if (a === "add-host") {
+            const r = await callTool("meet.add_host", { meeting: mid });
+            this.root.querySelector("#hostcmd").innerHTML = `<div class="ui-card meet-hostcmd"><p>Run this on a computer that is plugged in and has a good connection. It forwards the call without seeing it.</p><pre class="meet-cmd"><code>${esc(r.command)}</code></pre><p class="ui-hint">${esc(r.needs)}</p></div>`;
+            await copyText(r.command);
+            toast("Command copied");
+          }
+          if (["lock", "waiting-room", "webinar"].includes(a)) await this.loadStatus();
+        } catch (err) {
+          toast(err.message);
+        }
+      }
+      async onSideSubmit(e) {
+        if (e.target.id !== "chatform") return;
+        e.preventDefault();
+        const box = e.target.querySelector("#chatbox");
+        const body = box.value.trim();
+        if (!body) return;
+        box.value = "";
+        try {
+          await callTool("meet.send_chat", { meeting: this.meeting.id, body });
+          await this.loadChat();
+        } catch (err) {
+          box.value = body;
+          toast(err.message);
+        }
+      }
+      async onNotice(e) {
+        const b = e.target.closest("button[data-act]");
+        if (!b) return;
+        if (b.dataset.act === "share") await this.startShare();
+        if (b.dataset.act === "dismiss") {
+          this.requests = this.requests.filter((r) => r.id !== b.dataset.id);
+          this.render();
+        }
+        if (b.dataset.act === "admit-all") await callTool("meet.admit", { meeting: this.meeting.id, all: true }).catch((err) => toast(err.message));
+        if (b.dataset.act === "see-waiting") this.openPanel("people");
+      }
+      // ------------------------------------------------------------ for tests and the parity report
+      view() {
+        const tiles = [...this.root.querySelectorAll(".ui-tile")].map((el) => {
+          const v = el.querySelector("video");
+          return { key: el.dataset.key, name: el.querySelector(".ui-tile-n").textContent, video: !!v.srcObject, w: v.videoWidth, h: v.videoHeight, t: v.currentTime, frames: v.getVideoPlaybackQuality?.().totalVideoFrames ?? 0, speaking: el.classList.contains("is-speaking"), muted: el.classList.contains("is-muted") };
+        });
+        const audio = [...this.audios.values()].map((a) => ({ peer: a.dataset.peer, playing: !a.paused, t: a.currentTime, rtp: this.remote.get(`${a.dataset.peer}:mic`)?.receiver?.getSynchronizationSources?.()[0]?.rtpTimestamp ?? null }));
+        return { tiles, audio };
+      }
+      async snapshot() {
+        const { tiles, audio } = this.view();
+        return { peer: this.peer, mode: this.plan?.mode, engine: this.engine?.kind ?? null, signal: this.signalMode, tiles, audio, stats: await this.engine?.stats?.(), timings: this.timings, failover: this.lastFailover ?? null };
+      }
+    };
+    linkify = (s) => s.replace(/\bhttps?:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+  }
+});
+
+// public/app/home.mjs
+init_api();
+init_dom();
+var app = null;
+var nav = null;
+var REPO = "https://github.com/warOnSaaS/meet";
+var state = { who: null };
+window.meetState = state;
+var $ = (id) => app.querySelector(`#${id}`);
+function startMeet(root, navImpl) {
+  app = root;
+  nav = navImpl;
+  return route();
+}
+async function stopMeet() {
+  const c = window.meetCall;
+  window.meetCall = null;
+  if (c && !c.exited) await c.leave().catch(() => {
+  });
+}
+async function route() {
+  try {
+    await routeInner();
+  } catch (e) {
+    showError(e);
+  }
+}
+async function routeInner() {
+  state.who = await callTool("meet.whoami").catch(() => ({ user: null, can_start: false }));
+  const p = nav.path().split("?")[0];
+  const m = /^\/m\/([^/?#]+)/.exec(p);
+  if (m) return joinPage(decodeURIComponent(m[1]));
+  return homePage();
+}
+function showError(e) {
+  console.error(e);
+  app.innerHTML = `<main class="meet-center"><div class="ui-card meet-narrow"><h1 class="meet-h">Something went wrong</h1><p class="ui-mute">${esc(e.message ?? String(e))}</p><p><a class="ui-btn is-quiet" href="${nav.href("/")}">Back to start</a></p></div></main>`;
+  app.removeAttribute("aria-busy");
+}
+function topBar() {
+  if (nav.suite) return "";
+  const u = state.who?.user;
+  const right = u ? `<span class="ui-avatar is-sm" aria-hidden="true">${u.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : esc(initials(u.name))}</span><span class="hide-sm">${esc(u.name)}</span><a class="ui-btn is-ghost is-sm" href="/auth/signout">Sign out</a>` : state.who?.signin_available ? `<a class="ui-btn is-quiet is-sm" href="/auth/github?next=${encodeURIComponent(location.pathname + location.search)}">${icon("github")} Sign in with GitHub</a>` : "";
+  return `<header class="ui-top meet-top"><a class="ui-brand meet-brand" href="${nav.href("/")}">${icon("video")}<span>Meetings</span></a><div class="meet-top-r">${right}</div></header>`;
+}
+async function homePage() {
+  const w = state.who;
+  const signedIn = !!w.user;
+  const flash = nav.query().get("signin");
+  const flashMsg = { failed: "GitHub sign-in did not finish. Try again.", unavailable: "GitHub sign-in is not set up on this server. See docs/SELF-HOSTING.md.", "not-on-team": "That GitHub account is not on this team." }[flash];
+  app.innerHTML = `${topBar()}
+  <main class="meet-home">
+    ${flashMsg ? `<div class="ui-notice is-quiet">${esc(flashMsg)}</div>` : ""}
+    <section class="meet-hero">
+      <h1 class="meet-h1">Video meetings for small teams</h1>
+      <p class="meet-lead">${nav.suite ? "Start a call and send the link. People on your team walk straight in; anyone else with the link waits until you let them in. Calls of up to 4 people go straight between you." : "Start a call, send the link, talk. Guests join from a browser with no account. Small calls go straight between people; bigger ones are carried by a computer in the call, encrypted so it cannot see or hear them."}</p>
+      <div class="meet-actions">
+        ${w.can_start ? `<button class="ui-btn is-accent is-lg" data-tool="meet.create" id="start">${icon("video")} Start a meeting</button>` : signedIn ? "" : w.signin_available ? `<a class="ui-btn is-accent is-lg" href="/auth/github">${icon("github")} Sign in to start a meeting</a>` : ""}
+        <form class="meet-joinform" data-tool="meet.get" id="joinform">
+          <label class="ui-sr" for="joinlink">Meeting link or code</label>
+          <input class="ui-input" id="joinlink" name="link" placeholder="Paste a meeting link" autocomplete="off">
+          <button class="ui-btn is-quiet" type="submit" data-tool="meet.get">Join</button>
+        </form>
+      </div>
+    </section>
+    ${signedIn ? `<section class="meet-section">
+      <div class="meet-section-h"><h2 class="meet-h2">Your meetings</h2><div class="meet-section-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.export" id="export">Export</button><button class="ui-btn is-quiet is-sm" data-tool="meet.doctor" id="doctor">Check calls</button></div></div>
+      <div id="mine" class="meet-list"><p class="ui-empty">Loading\u2026</p></div>
+      <form class="ui-card meet-schedule" data-tool="meet.schedule" id="schedule">
+        <h3 class="meet-h3">Schedule a meeting</h3>
+        <div class="ui-fields">
+          <label class="ui-field is-wide"><span class="ui-label">Title</span><input class="ui-input" name="title" required placeholder="Weekly stand-up" maxlength="140"></label>
+          <label class="ui-field"><span class="ui-label">Starts</span><input class="ui-input" name="starts_at" type="datetime-local" required></label>
+          <label class="ui-field"><span class="ui-label">Length</span><select class="ui-select" name="duration_min"><option value="15">15 minutes</option><option value="30" selected>30 minutes</option><option value="45">45 minutes</option><option value="60">1 hour</option><option value="90">90 minutes</option></select></label>
+          <label class="ui-check is-wide"><input type="checkbox" name="waiting_room" checked> Waiting room: guests wait until you let them in</label>
+        </div>
+        <div class="meet-form-a"><button class="ui-btn is-accent" type="submit" data-tool="meet.schedule">Schedule</button></div>
+      </form>
+      <div id="doctorout"></div>
+    </section>` : ""}
+    <section class="meet-section meet-ways">
+      ${nav.suite ? "" : '<div class="ui-card"><h3 class="meet-h3">Use it here</h3><p class="ui-mute">Sign in with GitHub and start meetings on this server. Calls of up to 4 people need nothing else.</p></div>'}
+      <div class="ui-card"><h3 class="meet-h3">Host it yourself, free</h3><p class="ui-mute">One command on your own server: <code>docker compose up</code>. Add a media server for big calls with <code>--profile meetings</code>. AGPL-3.0.</p><p><a class="ui-btn is-quiet is-sm" href="${REPO}" rel="noopener">${icon("github")} Get the code</a></p></div>
+    </section>
+  </main>`;
+  app.removeAttribute("aria-busy");
+  $("start")?.addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      const m = await callTool("meet.create", { title: signedIn ? `${w.user.name}'s meeting` : "Meeting" });
+      const u = new URL(m.host_link);
+      await nav.go(u.pathname + u.search);
+    } catch (err) {
+      toast(err.message);
+      e.currentTarget.disabled = false;
+    }
+  });
+  $("joinform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const v = new FormData(e.currentTarget).get("link").toString().trim();
+    if (!v) return;
+    try {
+      const m = await callTool("meet.get", { meeting: v });
+      const u = new URL(m.join_url);
+      await nav.go(u.pathname);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  if (!signedIn) return;
+  const sch = $("schedule");
+  const d = new Date(Date.now() + 864e5);
+  d.setMinutes(0, 0, 0);
+  sch.starts_at.value = new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+  sch.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(sch);
+    try {
+      await callTool("meet.schedule", { title: f.get("title"), starts_at: new Date(f.get("starts_at")).toISOString(), duration_min: Number(f.get("duration_min")), waiting_room: f.get("waiting_room") === "on" });
+      sch.reset();
+      toast("Scheduled. Copy the invite from the list.");
+      loadMine();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  $("export").addEventListener("click", async () => {
+    try {
+      const data = await callTool("meet.export");
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })), download: "meetings-export.json" });
+      a.click();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  $("doctor").addEventListener("click", async (e) => {
+    const out = $("doctorout");
+    e.currentTarget.disabled = true;
+    out.innerHTML = '<p class="ui-mute">Checking\u2026</p>';
+    try {
+      const r = await callTool("meet.doctor");
+      out.innerHTML = `<div class="ui-card meet-doctor"><h3 class="meet-h3">${esc(r.summary)}</h3><ul class="meet-checks">${r.checks.map((c) => `<li><span class="ui-chip ${c.ok ? "is-good" : "is-bad"}">${c.ok ? "ok" : "fix"}</span> <b>${esc(c.name)}</b>: ${esc(c.said)}${c.fix ? `<br><span class="ui-hint">${esc(c.fix)}</span>` : ""}</li>`).join("")}</ul></div>`;
+    } catch (err) {
+      out.innerHTML = `<div class="ui-notice is-quiet">${esc(err.message)}</div>`;
+    }
+    e.currentTarget.disabled = false;
+  });
+  loadMine();
+}
+async function loadMine() {
+  const el = $("mine");
+  if (!el) return;
+  const { meetings } = await callTool("meet.list");
+  if (!meetings.length) {
+    el.innerHTML = '<p class="ui-empty">No meetings yet. Start one, or schedule one below.</p>';
+    return;
+  }
+  el.innerHTML = meetings.map((m) => `<div class="meet-row" data-id="${esc(m.id)}">
+    <div class="meet-row-m"><b>${esc(m.title)}</b><span class="ui-mute">${m.status === "live" ? '<span class="ui-chip is-good">Live</span>' : esc(m.starts_at ? fmtWhen(m.starts_at) : "Not scheduled")}${m.kind === "webinar" ? " \xB7 webinar" : ""}</span></div>
+    <div class="meet-row-a">
+      <button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button>
+      <a class="ui-btn is-sm" href="${esc(new URL(m.join_url).pathname)}">Join</a>
+      ${m.status === "scheduled" ? '<button class="ui-btn is-ghost is-sm" data-tool="meet.cancel" data-act="cancel">Cancel</button>' : ""}
+    </div></div>`).join("");
+  el.onclick = async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const id = b.closest("[data-id]").dataset.id;
+    try {
+      if (b.dataset.act === "invite") {
+        const r = await callTool("meet.invite", { meeting: id });
+        await copyText(r.message);
+        toast("Invite copied");
+      }
+      if (b.dataset.act === "cancel") {
+        await callTool("meet.cancel", { meeting: id });
+        toast("Cancelled");
+        loadMine();
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+}
+var ticketKey = (mid) => `meet:ticket:${mid}`;
+var store = {
+  get(k) {
+    try {
+      return sessionStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set(k, v) {
+    try {
+      sessionStorage.setItem(k, v);
+    } catch {
+    }
+  },
+  del(k) {
+    try {
+      sessionStorage.removeItem(k);
+    } catch {
+    }
+  }
+};
+async function joinPage(token) {
+  const qs = nav.query();
+  if (qs.get("hk")) return hostLinkPage(token, qs.get("hk"));
+  let m = await callTool("meet.get", { meeting: token });
+  const saved = store.get(ticketKey(m.id));
+  if (saved) {
+    setTicket(saved);
+    m = await callTool("meet.get", { meeting: token });
+  }
+  if (m.status === "ended") return endedPage("This meeting has ended.");
+  if (m.you?.status === "removed") return endedPage("The host removed you from this meeting.");
+  const hostKey = qs.get("host");
+  const name = m.you?.display_name ?? state.who.user?.name ?? store.get("meet:name") ?? "";
+  const prefs = { audio: store.get("meet:audio") !== "0", video: store.get("meet:video") !== "0" };
+  const viewer = m.kind === "webinar" && !hostKey && !m.you_host && !["speaker", "cohost", "host"].includes(m.you?.role);
+  app.innerHTML = `${topBar()}
+  <main class="meet-pre ${viewer ? "is-viewer" : ""}">
+    ${viewer ? `<div class="meet-pre-v"><div class="ui-tile meet-preview is-cam-off"><span class="ui-avatar">${icon("people", 28)}</span></div><p class="ui-hint meet-perm">You join as a viewer. If the host lets you speak, your browser will ask for your microphone and camera then.</p></div>` : `<div class="meet-pre-v">
+      <div class="ui-tile meet-preview ${prefs.video ? "" : "is-cam-off"}" id="preview"><video autoplay playsinline muted></video><span class="ui-avatar">${esc(initials(name || "?"))}</span><span class="ui-tile-n">${esc(name || "You")}</span></div>
+      <div class="ui-callbar">
+        <button data-tool="none" data-why="chooses whether you join with the microphone on; nothing is sent before you join" id="pmic" aria-pressed="${prefs.audio}" aria-label="Microphone">${icon(prefs.audio ? "mic" : "mic-off")}</button>
+        <button data-tool="none" data-why="chooses whether you join with the camera on; nothing is sent before you join" id="pcam" aria-pressed="${prefs.video}" aria-label="Camera">${icon(prefs.video ? "cam" : "cam-off")}</button>
+      </div>
+      <p class="ui-hint meet-perm" id="perm"></p>
+    </div>`}
+    <form class="meet-pre-f" data-tool="meet.join" id="jf">
+      <p class="ui-label">${m.kind === "webinar" ? "Webinar" : "Meeting"}</p>
+      <h1 class="meet-h">${esc(m.title)}</h1>
+      <p class="ui-mute">${m.status === "live" ? "Happening now." : m.starts_at ? `Starts ${esc(fmtWhen(m.starts_at))}.` : ""} ${m.waiting_room && !hostKey && !m.you_host ? "The host lets people in." : ""}</p>
+      <label class="ui-field"><span class="ui-label">Your name</span><input class="ui-input" name="name" value="${esc(name)}" required maxlength="60" autocomplete="name" placeholder="Your name"></label>
+      <button class="ui-btn is-accent is-lg is-block" type="submit" data-tool="meet.join">${hostKey || m.you_host ? "Start the meeting" : "Join"}</button>
+      ${!state.who.user && state.who.signin_available ? `<p class="ui-hint">Have an account? <a href="/auth/github?next=${encodeURIComponent(location.pathname + location.search)}">Sign in with GitHub</a>.</p>` : ""}
+    </form>
+  </main>`;
+  app.removeAttribute("aria-busy");
+  const local = { stream: null, mic: null, cam: null };
+  const video = app.querySelector("#preview video");
+  const perm = $("perm");
+  async function getMedia() {
+    if (viewer) return;
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } } });
+      local.mic = s.getAudioTracks()[0] ?? null;
+      local.cam = s.getVideoTracks()[0] ?? null;
+      perm.textContent = "";
+    } catch (e) {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        local.mic = s.getAudioTracks()[0];
+      } catch {
+      }
+      perm.textContent = e.name === "NotAllowedError" ? "The browser blocked the camera or microphone. Allow them with the icon in the address bar, then reload. You can still join and listen." : "No camera found. You can still join.";
+    }
+    if (local.mic) local.mic.enabled = prefs.audio;
+    if (local.cam && !prefs.video) {
+      local.cam.stop();
+      local.cam = null;
+    }
+    video.srcObject = local.cam ? new MediaStream([local.cam]) : null;
+  }
+  const mediaReady = getMedia();
+  const pmic = $("pmic");
+  const pcam = $("pcam");
+  if (pmic) pmic.onclick = () => {
+    prefs.audio = !prefs.audio;
+    if (local.mic) local.mic.enabled = prefs.audio;
+    pmic.setAttribute("aria-pressed", prefs.audio);
+    pmic.innerHTML = icon(prefs.audio ? "mic" : "mic-off");
+    store.set("meet:audio", prefs.audio ? "1" : "0");
+  };
+  if (pcam) pcam.onclick = async () => {
+    prefs.video = !prefs.video;
+    pcam.setAttribute("aria-pressed", prefs.video);
+    pcam.innerHTML = icon(prefs.video ? "cam" : "cam-off");
+    store.set("meet:video", prefs.video ? "1" : "0");
+    $("preview").classList.toggle("is-cam-off", !prefs.video);
+    if (!prefs.video && local.cam) {
+      local.cam.stop();
+      local.cam = null;
+      video.srcObject = null;
+    }
+    if (prefs.video && !local.cam) {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+        local.cam = s.getVideoTracks()[0];
+        video.srcObject = new MediaStream([local.cam]);
+      } catch {
+        perm.textContent = "The camera is blocked or busy.";
+      }
+    }
+  };
+  $("jf").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.currentTarget.querySelector("button[type=submit]");
+    btn.disabled = true;
+    const nm = new FormData(e.currentTarget).get("name").toString().trim();
+    store.set("meet:name", nm);
+    try {
+      let r = await callTool("meet.join", { meeting: m.id, name: nm, ...hostKey ? { host_key: hostKey } : {} });
+      setTicket(r.ticket);
+      store.set(ticketKey(m.id), r.ticket);
+      if (hostKey) nav.replace(nav.path().split("?")[0]);
+      if (r.participant.status === "waiting") r = await waitingRoom(m, r);
+      if (!r) return;
+      await mediaReady;
+      const { Call: Call2 } = await Promise.resolve().then(() => (init_call(), call_exports));
+      const call = new Call2({ root: app, meeting: r.meeting, participant: r.participant, media: r.media, local, prefs, onExit: (why) => {
+        store.del(ticketKey(m.id));
+        endedPage(why);
+      } });
+      window.meetCall = call;
+      await call.start();
+    } catch (err) {
+      btn.disabled = false;
+      if (err instanceof ToolFailed && err.code === "ended") return endedPage(err.message);
+      toast(err.message);
+    }
+  });
+}
+async function waitingRoom(m, r) {
+  app.innerHTML = `${topBar()}<main class="meet-center"><div class="ui-card meet-narrow meet-waiting">
+    <span class="meet-pulse" aria-hidden="true"></span>
+    <h1 class="meet-h">Waiting for the host</h1>
+    <p class="ui-mute">${esc(m.title)}. The host will let you in soon. Keep this page open.</p>
+    <button class="ui-btn is-quiet" data-tool="meet.leave" id="wleave">Leave</button>
+  </div></main>`;
+  let gone = false;
+  $("wleave").onclick = async () => {
+    gone = true;
+    await callTool("meet.leave", { meeting: m.id }).catch(() => {
+    });
+    store.del(ticketKey(m.id));
+    nav.go("/");
+  };
+  for (; ; ) {
+    await new Promise((res) => setTimeout(res, 2e3));
+    if (gone) return null;
+    try {
+      r = await callTool("meet.join", { meeting: m.id });
+      if (r.participant.status === "admitted") return r;
+      if (r.participant.status === "denied") {
+        endedPage("The host did not let you in.");
+        return null;
+      }
+    } catch (err) {
+      if (["removed", "ended", "locked"].includes(err.code)) {
+        endedPage(err.message);
+        return null;
+      }
+    }
+  }
+}
+function endedPage(message) {
+  app.innerHTML = `${topBar()}<main class="meet-center"><div class="ui-card meet-narrow"><h1 class="meet-h">${esc(message || "You left the meeting.")}</h1><p class="meet-actions"><a class="ui-btn is-quiet" href="${nav.href("/")}">Back to start</a>${nav.path().startsWith("/m/") && !/ended|removed|did not/.test(message ?? "") ? `<a class="ui-btn" href="${esc(nav.href(nav.path().split("?")[0]))}">Rejoin</a>` : ""}</p></div></main>`;
+  app.removeAttribute("aria-busy");
+}
+function hostLinkPage(token, hk) {
+  const cmd = `npx -y github:warOnSaaS/meet host "${location.origin}${nav.href(`/m/${token}`)}?hk=${hk}"`;
+  app.innerHTML = `${topBar()}<main class="meet-center"><div class="ui-card meet-narrow">
+    <h1 class="meet-h">Help carry this call</h1>
+    <p class="ui-mute">This link is for a computer that forwards the call for others. Run this in a terminal on a computer that is plugged in and has a good connection (Node 22 or newer), or open it in the wOS desktop app.</p>
+    <pre class="meet-cmd"><code>${esc(cmd)}</code></pre>
+    <p class="meet-actions"><button class="ui-btn is-quiet" data-tool="none" data-why="copies the command shown on screen" id="copycmd">Copy command</button><a class="ui-btn is-ghost" href="${esc(nav.href(`/m/${token}`))}">Join the call instead</a></p>
+  </div></main>`;
+  app.removeAttribute("aria-busy");
+  $("copycmd").onclick = async () => {
+    await copyText(cmd);
+    toast("Copied");
+  };
+}
+
+// screens/index.mjs
+init_api();
+init_dom();
+
+// public/app/meet.css
+var meet_default = ".wos-meet{@keyframes meet-pulse{0%{box-shadow:0 0 color-mix(in srgb,var(--ui-accent) 45%,transparent)}to{box-shadow:0 0 0 16px transparent}}}.wos-meet .meet-top{max-width:1200px;margin:0 auto}.wos-meet .meet-top-r{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ui-ink-2)}.wos-meet .meet-brand svg{height:22px;width:22px}.wos-meet .meet-h1{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);letter-spacing:var(--ui-display-track,-.02em);font-size:clamp(30px,5vw,48px);line-height:1.08;margin:0 0 14px}.wos-meet .meet-h{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);font-size:24px;line-height:1.2;margin:0 0 8px}.wos-meet .meet-h2{font-size:17px;font-weight:var(--ui-weight-strong,600);margin:0}.wos-meet .meet-h3{font-size:15px;font-weight:var(--ui-weight-strong,600);margin:0 0 8px}.wos-meet .meet-lead{font-size:17px;color:var(--ui-ink-2);max-width:640px;margin:0 0 24px;line-height:1.55}.wos-meet .meet-home{max-width:960px;margin:0 auto;padding:clamp(24px,6vw,72px) 16px 64px}.wos-meet .meet-hero{margin-bottom:48px}.wos-meet .meet-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.wos-meet .meet-joinform{display:flex;gap:8px;flex:1;min-width:min(100%,320px);max-width:440px}.wos-meet .meet-joinform .ui-input{min-height:42px}.wos-meet .meet-section{margin-top:36px}.wos-meet .meet-section-h{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}.wos-meet .meet-section-a{display:flex;gap:8px}.wos-meet .meet-list{display:grid;gap:8px;margin-bottom:20px}.wos-meet .meet-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:var(--ui-card);border:1px solid var(--ui-card-line);border-radius:var(--ui-radius);flex-wrap:wrap}.wos-meet .meet-row-m{display:grid;gap:2px;min-width:0}.wos-meet .meet-row-m b{font-weight:var(--ui-weight-strong,600)}.wos-meet .meet-row-m .ui-mute{font-size:13.5px}.wos-meet .meet-row-a{display:flex;gap:6px;flex-wrap:wrap}.wos-meet .meet-schedule{margin-top:8px}.wos-meet .meet-form-a{display:flex;justify-content:flex-end}.wos-meet .meet-ways{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wos-meet .meet-ways p{margin:0 0 8px}.wos-meet .meet-ways code,.wos-meet .meet-cmd{font-family:var(--ui-mono,ui-monospace),monospace;font-size:13px}.wos-meet .meet-doctor{margin-top:12px}.wos-meet .meet-checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px}.wos-meet .meet-center{min-height:calc(100svh - 80px);display:grid;place-items:center;padding:16px}.wos-meet .meet-narrow{width:min(520px,100%);padding:28px}.wos-meet .meet-cmd{white-space:pre-wrap;word-break:break-all;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);padding:12px;margin:12px 0}.wos-meet .meet-waiting{text-align:center}.wos-meet .meet-waiting .ui-btn{margin-top:8px}.wos-meet .meet-pulse{display:block;width:14px;height:14px;margin:4px auto 16px;border-radius:50%;background:var(--ui-accent);animation:meet-pulse 1.6s ease-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-pulse{animation:none}}.wos-meet .meet-pre{max-width:1100px;margin:0 auto;padding:clamp(16px,4vw,48px) 16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:clamp(20px,4vw,48px);align-items:center}.wos-meet .meet-preview{width:100%}.wos-meet .meet-preview video{transform:scaleX(-1)}.wos-meet .meet-pre-f .ui-btn.is-block{margin-top:4px}.wos-meet .meet-pre-f .ui-hint{margin-top:12px}.wos-meet .meet-perm{text-align:center;min-height:1em}.wos-meet .ui-tile>.ui-avatar{position:relative;z-index:0}.wos-meet .ui-tile video{opacity:0;transition:opacity var(--ui-dur) var(--ui-ease)}.wos-meet .ui-tile.has-video video,.wos-meet .meet-preview:not(.is-cam-off) video{opacity:1;z-index:1}.wos-meet .ui-tile.has-video>.ui-avatar{visibility:hidden}.wos-meet .ui-tile .ui-tile-n,.wos-meet .ui-tile .ui-tile-tag{z-index:2}.wos-meet .ui-tile.is-mine video{transform:scaleX(-1)}.wos-meet .ui-tile.is-screen video{object-fit:contain;background:#000}.wos-meet .ui-tile.is-trouble{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ui-bad) 60%,transparent)}.wos-meet .ui-callbar button svg{pointer-events:none}.wos-meet .ui-callbar button.is-on{background:var(--ui-accent);color:var(--ui-on-accent);border-color:transparent}.wos-meet .meet-call{height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}.wos-meet .meet-call-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 4px}.wos-meet .meet-call-t{display:flex;align-items:baseline;gap:10px;min-width:0}.wos-meet .meet-call-t b{font-weight:var(--ui-weight-strong,600);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-mode{font-size:13px;white-space:nowrap}.wos-meet .meet-notices{display:grid;gap:6px;padding:0 16px}.wos-meet .meet-notices:not(:empty){padding-top:6px}.wos-meet .meet-notices .ui-notice{align-items:center;flex-wrap:wrap}.wos-meet .meet-notices .ui-notice>span{flex:1;min-width:200px}.wos-meet .meet-body{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;padding:8px 16px 0;gap:12px}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr) 340px}.wos-meet .meet-stage{position:relative;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden;border-radius:var(--ui-radius-lg)}.wos-meet .meet-stage .ui-calls{min-height:0;overflow:auto;align-content:center;justify-content:center}.wos-meet .meet-main:empty{display:none}.wos-meet .meet-stage.has-big{grid-template-rows:minmax(0,1fr) auto}.wos-meet .meet-stage.has-big .meet-main{min-height:0;display:grid;padding:8px;background:color-mix(in srgb,var(--ui-ink) 6%,var(--ui-bg));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0}.wos-meet .meet-stage.has-big .meet-main>.ui-tile{aspect-ratio:auto;height:100%;min-height:0;grid-column:auto}.wos-meet .meet-stage.has-big .meet-main>.ui-tile video{object-fit:contain;background:#000}.wos-meet .ui-calls.is-strip{display:flex;overflow-x:auto;align-content:start;border-radius:0 0 var(--ui-radius-lg) var(--ui-radius-lg)}.wos-meet .ui-calls.is-strip:empty{display:none}.wos-meet .ui-calls.is-strip>.ui-tile{flex:0 0 180px;aspect-ratio:16/10}.wos-meet .meet-tap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5}.wos-meet .meet-bar{padding:10px 16px calc(10px + env(safe-area-inset-bottom))}.wos-meet .meet-bar-sep{width:1px;height:28px;background:var(--ui-line);margin:0 4px}.wos-meet .meet-bar button{position:relative}.wos-meet .meet-dot{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--ui-accent);color:var(--ui-on-accent);font:600 11px/18px var(--ui-font)}.wos-meet .meet-side{min-height:0;display:none;flex-direction:column;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}.wos-meet .meet-side:not(:empty){display:flex}.wos-meet .meet-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 0;border-bottom:1px solid var(--ui-line)}.wos-meet .meet-side-h .ui-tabs{border:0}.wos-meet .meet-side-b{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column}.wos-meet .meet-side-sub{font-size:12px;font-weight:500;color:var(--ui-ink-3);margin:12px 0 6px}.wos-meet .meet-side-sub:first-child{margin-top:0}.wos-meet .meet-side-a{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px}.wos-meet .meet-side-a.is-col{flex-direction:column;align-items:stretch;margin-top:16px}.wos-meet .meet-side-a.is-col .ui-btn{justify-content:flex-start}.wos-meet .meet-plist{list-style:none;margin:0;padding:0;display:grid;gap:2px}.wos-meet .meet-prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 4px;border-radius:var(--ui-radius-sm)}.wos-meet .meet-prow:hover{background:var(--ui-hover)}.wos-meet .meet-prow-m{display:grid;gap:2px;min-width:0;font-size:14px}.wos-meet .meet-prow-m>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-prow-c{display:flex;gap:4px;flex-wrap:wrap}.wos-meet .meet-prow-c:empty{display:none}.wos-meet .meet-prow-i{color:var(--ui-ink-3);display:grid}.wos-meet .meet-prow-i.is-off{color:var(--ui-bad)}.wos-meet .meet-prow-a{grid-column:2/-1;display:none;flex-wrap:wrap;gap:4px}.wos-meet .meet-prow:hover .meet-prow-a,.wos-meet .meet-prow:focus-within .meet-prow-a,.wos-meet .meet-prow-a.is-on{display:flex}@media(hover:none){.wos-meet .meet-prow-a{display:flex}}.wos-meet .meet-chatlist{list-style:none;margin:0;padding:0;flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px}.wos-meet .meet-cmsg{display:grid;gap:2px;font-size:14px}.wos-meet .meet-cmsg-h{font-size:12.5px}.wos-meet .meet-cmsg-b{white-space:pre-wrap;overflow-wrap:anywhere}.wos-meet .meet-composer{margin:10px 0 0}.wos-meet .meet-kv{font-size:13.5px}.wos-meet .meet-link code{font-family:var(--ui-mono,ui-monospace),monospace;font-size:12.5px;word-break:break-all}.wos-meet .meet-hosts{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13.5px}.wos-meet .meet-hosts li{display:flex;gap:6px;align-items:center}.wos-meet .meet-hostcmd{margin-top:12px;font-size:13.5px}@media(max-width:760px){.wos-meet .meet-pre{grid-template-columns:1fr}.wos-meet .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}.wos-meet .meet-ways{grid-template-columns:1fr}.wos-meet .meet-body{padding:6px 8px 0}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}.wos-meet .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}.wos-meet .meet-bar button{width:38px;height:38px;flex:none}.wos-meet .meet-bar [data-act=info],.wos-meet .meet-bar-sep{display:none}.wos-meet .meet-bar button.is-leave{width:auto;padding:0 14px}.wos-meet .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}.wos-meet .meet-mode{display:none}}\n";
+
+// screens/index.mjs
+var BASE = "/a/meet";
+var index_default = {
+  title: "Meetings",
+  mount(el, ctx) {
+    const doc = el.ownerDocument;
+    el.classList.add("wos-meet");
+    if (!doc.getElementById("wos-meet-style")) doc.head.append(Object.assign(doc.createElement("style"), { id: "wos-meet-style", textContent: meet_default }));
+    configure({ callTool: (name, input) => ctx.callTool(name, input), media: "/media/meet" });
+    if (ctx.toast) setToast((m) => ctx.toast(m));
+    let path = ctx.path || "/";
+    const strip = (p) => {
+      let x = String(p);
+      if (x.startsWith(BASE)) x = x.slice(BASE.length) || "/";
+      return x;
+    };
+    const nav2 = {
+      suite: true,
+      path: () => path,
+      query: () => new URLSearchParams(path.split("?")[1] ?? ""),
+      // The suite's address bar carries the path; a query (a host key) stays in memory only.
+      go: (p) => {
+        path = strip(p);
+        ctx.navigate(path.split("?")[0]);
+        return route();
+      },
+      replace: (p) => {
+        path = strip(p);
+      },
+      href: (p) => `${BASE}${p === "/" ? "" : p}`
+    };
+    const onClick = (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target.closest?.("a[href]");
+      if (!a || a.target || a.hasAttribute("download")) return;
+      const href = a.getAttribute("href");
+      if (!href.startsWith(BASE)) return;
+      e.preventDefault();
+      nav2.go(href);
+    };
+    el.addEventListener("click", onClick);
+    startMeet(el, nav2);
+    return {
+      update(p) {
+        const next = strip(p || "/");
+        if (next.split("?")[0] === path.split("?")[0]) return;
+        path = next;
+        stopMeet().finally(() => route());
+      },
+      unmount() {
+        el.removeEventListener("click", onClick);
+        stopMeet();
+        el.innerHTML = "";
+        el.classList.remove("wos-meet");
+      }
+    };
+  }
+};
+export {
+  index_default as default
+};

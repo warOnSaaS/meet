@@ -20,12 +20,13 @@ test('no side doors: screens only call /api/tools and the call\'s /media routes'
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
     for (const m of src.matchAll(/fetch\(\s*([`'"])(.*?)\1/g)) {
-      const url = m[2].replace(/\$\{[^}]*base[^}]*\}/, '');
-      if (url === '${path}' && path.basename(f) === 'signal.mjs') continue; // Signal.post: its callers are checked below
+      // The media prefix is /media standalone and /media/meet inside the suite (configure() in api.mjs).
+      const url = m[2].replace(/\$\{[^}]*\bbase\b[^}]*\}/, '').replace(/\$\{(mediaBase|getMediaBase\(\)|this\.media)\}/, '/media');
+      if (/^\$\{path(\.replace\(.*\))?\}$/.test(url) && path.basename(f) === 'signal.mjs') continue; // Signal.post: its callers are checked below
       if (!/^\/(api\/tools\/|media\/)/.test(url)) problems.push(`${path.basename(f)}: fetch(${m[2]})`);
     }
     for (const m of src.matchAll(/\.post\(\s*([`'"])(.*?)\1/g)) if (!m[2].startsWith('/media/')) problems.push(`${path.basename(f)}: post(${m[2]})`);
-    for (const m of src.matchAll(/sendBeacon\?*\.?\(\s*([`'"])(.*?)\1/g)) if (!m[2].startsWith('/media/')) problems.push(`${path.basename(f)}: sendBeacon(${m[2]})`);
+    for (const m of src.matchAll(/sendBeacon\?*\.?\(\s*([`'"])(.*?)\1/g)) if (!m[2].replace(/^\$\{getMediaBase\(\)\}/, '/media').startsWith('/media/')) problems.push(`${path.basename(f)}: sendBeacon(${m[2]})`);
   }
   assert.deepEqual(problems, []);
 });

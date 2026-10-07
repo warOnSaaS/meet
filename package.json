@@ -22,11 +22,12 @@
     "test": "node --test test/unit/*.test.mjs",
     "test:e2e": "node --test --test-concurrency=1 --test-timeout=300000 test/e2e/*.test.mjs",
     "tools:json": "node scripts/tools-json.mjs",
-    "check": "node scripts/tools-json.mjs --check && node scripts/check-clean.mjs",
+    "check": "node scripts/tools-json.mjs --check && node scripts/build-screens.mjs --check && node scripts/check-clean.mjs",
     "sync-kit": "node scripts/sync-kit.mjs",
     "shots": "node scripts/shots.mjs",
     "check:clean": "node scripts/check-clean.mjs",
-    "doctor": "node bin/meet.mjs doctor"
+    "doctor": "node bin/meet.mjs doctor",
+    "build:screens": "node scripts/build-screens.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",

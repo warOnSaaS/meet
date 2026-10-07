@@ -4,7 +4,11 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&a
 export const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 
 let toastT;
+let toastFn = null;
+// Inside the suite, messages go to the suite's own toast.
+export const setToast = (fn) => { toastFn = fn; };
 export function toast(msg, ms = 3200) {
+  if (toastFn) return toastFn(msg);
   const t = document.getElementById('toast');
   if (!t) return;
   t.textContent = msg;

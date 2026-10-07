@@ -3,8 +3,8 @@
 // Messages: { from, to, type, body }. to is a peer id, or '*' for everyone in the meeting.
 
 export class Signal {
-  constructor({ base = '', token, cursor = 0, ws = false, onMessage, onGone, onState }) {
-    Object.assign(this, { base, token, cursor, useWs: ws, onMessage, onGone, onState });
+  constructor({ base = '', media = '/media', token, cursor = 0, ws = false, onMessage, onGone, onState }) {
+    Object.assign(this, { base, media, token, cursor, useWs: ws, onMessage, onGone, onState });
     this.handlers = new Map();
     this.out = [];
     this.closed = false;
@@ -60,7 +60,7 @@ export class Signal {
   openWs() {
     const u = new URL(this.base || (typeof location !== 'undefined' ? location.origin : 'http://localhost'));
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-    u.pathname = '/media/ws';
+    u.pathname = `${this.media}/ws`;
     u.search = `?token=${encodeURIComponent(this.token)}&since=${this.cursor}`;
     let opened = false;
     const ws = new WebSocket(u.toString());
@@ -82,7 +82,7 @@ export class Signal {
     let backoff = 250;
     while (!this.closed) {
       try {
-        const r = await fetch(`${this.base}/media/signal?since=${this.cursor}&wait=8000`, { headers: { 'x-meet-peer': this.token } });
+        const r = await fetch(`${this.base}${this.media}/signal?since=${this.cursor}&wait=8000`, { headers: { 'x-meet-peer': this.token } });
         if (r.status === 401) { this.close(); this.onGone?.(); return; }
         const d = await r.json();
         if (d.msgs) this.dispatch(d.msgs);
@@ -106,7 +106,7 @@ export class Signal {
     const msgs = this.out.splice(0);
     if (this.ws?.readyState === 1) { this.ws.send(JSON.stringify({ msgs })); return; }
     try {
-      await fetch(`${this.base}/media/signal`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-meet-peer': this.token }, body: JSON.stringify({ msgs }) });
+      await fetch(`${this.base}${this.media}/signal`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-meet-peer': this.token }, body: JSON.stringify({ msgs }) });
     } catch {
       this.out.unshift(...msgs);
       setTimeout(() => this.flush(), 500);
@@ -142,7 +142,7 @@ export class Signal {
   }
 
   async post(path, body) {
-    const r = await fetch(`${this.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-meet-peer': this.token }, body: JSON.stringify(body ?? {}) });
+    const r = await fetch(`${this.base}${path.replace(/^\/media(?=\/)/, this.media)}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-meet-peer': this.token }, body: JSON.stringify(body ?? {}) });
     return r.json();
   }
 

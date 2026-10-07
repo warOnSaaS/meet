@@ -72,8 +72,8 @@ async function newMeeting(ctx, { title, starts_at, duration_min, waiting_room = 
     e2ee_key: secretToken(32), linked_record, created_at: now(),
   };
   await ctx.db.run(
-    'INSERT INTO meetings (id, title, host_id, starts_at, duration_min, status, room_name, link_token, waiting_room, kind, e2ee_key, linked_record, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [m.id, m.title, m.host_id, m.starts_at, m.duration_min, m.status, m.room_name, m.link_token, m.waiting_room, m.kind, m.e2ee_key, m.linked_record, m.created_at],
+    'INSERT INTO meetings (id, team_id, title, host_id, starts_at, duration_min, status, room_name, link_token, waiting_room, kind, e2ee_key, linked_record, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [m.id, ctx.teamId ?? 'default', m.title, m.host_id, m.starts_at, m.duration_min, m.status, m.room_name, m.link_token, m.waiting_room, m.kind, m.e2ee_key, m.linked_record, m.created_at],
   );
   const hostKey = sign(ctx.config.secret, { k: 'hostkey', mid: m.id, exp: now() + 30 * 864e5 });
   return { m: { ...m, locked: 0, media_pref: 'auto' }, hostKey };
@@ -157,7 +157,9 @@ export const tools = [
     input: { type: 'object', properties: { include_ended: bool('Also list ended meetings') } },
     async handler(ctx, a) {
       const u = requireMember(ctx);
-      const rows = await ctx.db.all(`SELECT * FROM meetings WHERE host_id = ? ${a.include_ended ? '' : "AND status <> 'ended'"} ORDER BY CASE status WHEN 'live' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(starts_at, created_at) LIMIT 200`, [u.id]);
+      // Inside the suite: the team's meetings (every member may join them). Standalone: the ones you set up.
+      const who = ctx.teamId ? 'team_id = ?' : 'host_id = ?';
+      const rows = await ctx.db.all(`SELECT * FROM meetings WHERE ${who} ${a.include_ended ? '' : "AND status <> 'ended'"} ORDER BY CASE status WHEN 'live' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(starts_at, created_at) LIMIT 200`, [ctx.teamId ?? u.id]);
       return { meetings: rows.map((m) => meetingOut(ctx, m)) };
     },
   },
@@ -240,7 +242,9 @@ export const tools = [
         const role = isHost ? 'host' : m.kind === 'webinar' ? 'viewer' : u ? 'member' : 'guest';
         // Waiting room holds guests. Team members and the host walk in. With no host present, nobody can admit,
         // so the first person in a meeting with no owner becomes its host.
-        const admitted = isHost || !m.waiting_room || (u && m.host_id && u.id) || (!m.host_id && !hasHost);
+        // Inside the suite, "team members" means the meeting's own team: people from other teams wait like guests.
+        const member = u && m.host_id && (!ctx.teamId || m.team_id === ctx.teamId);
+        const admitted = isHost || !m.waiting_room || member || (!m.host_id && !hasHost);
         p = { id: id('pt_'), meeting_id: m.id, user_id: u?.id ?? null, guest_name: u ? null : name, display_name: name, role: !m.host_id && !hasHost && !isHost ? 'host' : role, status: admitted ? 'admitted' : 'waiting', asked_at: now(), joined_at: admitted ? now() : null, kind: a.as === 'agent' ? 'agent' : 'person' };
         await ctx.db.run('INSERT INTO meeting_participants (id, meeting_id, user_id, guest_name, display_name, role, status, asked_at, joined_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [p.id, p.meeting_id, p.user_id, p.guest_name, p.display_name, p.role, p.status, p.asked_at, p.joined_at, p.kind]);
         if (m.status === 'scheduled' && admitted) await ctx.db.run("UPDATE meetings SET status = 'live', started_at = ? WHERE id = ?", [now(), m.id]);
@@ -536,7 +540,7 @@ export const tools = [
     input: { type: 'object', required: ['for'], properties: { for: str('The record the room belongs to, for example chat:channel:general'), title: str('Room title'), name: str('Your name, for guests') } },
     async handler(ctx, a) {
       canCreate(ctx);
-      let m = await ctx.db.get("SELECT * FROM meetings WHERE linked_record = ? AND kind = 'huddle' AND status <> 'ended' ORDER BY created_at DESC", [a.for]);
+      let m = await ctx.db.get(`SELECT * FROM meetings WHERE linked_record = ? AND kind = 'huddle' AND status <> 'ended'${ctx.teamId ? ' AND team_id = ?' : ''} ORDER BY created_at DESC`, ctx.teamId ? [a.for, ctx.teamId] : [a.for]);
       if (!m) m = (await newMeeting(ctx, { title: a.title || `Huddle: ${a.for.split(':').pop()}`, kind: 'huddle', waiting_room: false, linked_record: a.for, status: 'live' })).m;
       const join = await byName.get('meet.join').handler(ctx, { meeting: m.id, name: a.name });
       return { ...join, meeting: meetingOut(ctx, m) };
@@ -569,7 +573,7 @@ export const tools = [
     input: { type: 'object', properties: {} },
     async handler(ctx) {
       const u = requireMember(ctx);
-      const ms = await ctx.db.all('SELECT * FROM meetings WHERE host_id = ? ORDER BY created_at', [u.id]);
+      const ms = ctx.teamId ? await ctx.db.all('SELECT * FROM meetings WHERE team_id = ? ORDER BY created_at', [ctx.teamId]) : await ctx.db.all('SELECT * FROM meetings WHERE host_id = ? ORDER BY created_at', [u.id]);
       const out = [];
       for (const m of ms) {
         const { e2ee_key: _k, ...rest } = m;
