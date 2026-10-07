@@ -80,7 +80,7 @@ export async function runDoctor({ config, publicUrl, livekitHost } = {}) {
       add('TURN reachable', r.ok, r.ok ? `The TURN server at ${u} answers.` : `The TURN server at ${u} did not answer (${r.error}).`, 'Check the TURN address and that UDP 3478 is open on that server.');
     }
   } else {
-    add('TURN', true, 'No TURN server is set. Most people connect directly; roughly 1 in 10 behind strict company or hotel firewalls will not. Set TURN_URLS to fix that.', null);
+    add('TURN', true, 'No TURN server is set. Most people connect directly; some behind strict company or hotel firewalls will not, and they will see a message saying so. Set TURN_URLS to fix that.', null);
   }
 
   if (config?.livekit || livekitHost) {
