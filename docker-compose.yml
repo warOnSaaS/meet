@@ -1,0 +1,55 @@
+# Self-host wOS Meetings.
+#   docker compose up -d                          the app, Postgres and Caddy (HTTPS for your domain)
+#   docker compose --profile meetings up -d       also LiveKit, a media server for big calls (with its own TURN)
+#   docker compose --profile turn up -d           also coturn, a relay for people behind strict firewalls
+# Set DOMAIN and the rest in .env (copy .env.example). Calls of up to 4 people need only the first line.
+services:
+  meet:
+    build: .
+    image: wos-meet
+    restart: unless-stopped
+    env_file: [{ path: .env, required: false }]
+    environment:
+      DATABASE_URL: postgres://meet:meet@db:5432/meet
+      PUBLIC_URL: https://${DOMAIN:-localhost}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env to a long random string}
+    depends_on:
+      db: { condition: service_healthy }
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_USER: meet, POSTGRES_PASSWORD: meet, POSTGRES_DB: meet }
+    volumes: ["meet-db:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U meet"], interval: 5s, retries: 10 }
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment: { DOMAIN: "${DOMAIN:-localhost}", LIVEKIT_DOMAIN: "${LIVEKIT_DOMAIN:-livekit.localhost}" }
+    volumes: ["./deploy/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy-data:/data"]
+    depends_on: [meet]
+
+  # A media server for calls bigger than the computers in the call can carry. Uses the host network so its
+  # UDP ports (50000-60000) and TURN (3478 UDP, 5349 TLS) are reachable. Set LIVEKIT_URL, LIVEKIT_API_KEY and
+  # LIVEKIT_API_SECRET in .env to the same key and secret.
+  livekit:
+    profiles: ["meetings"]
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    network_mode: host
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-change-me-to-a-secret-of-32-chars-or-more}"
+    volumes: ["./deploy/livekit.yaml:/etc/livekit.yaml:ro"]
+
+  # A TURN relay (coturn, BSD-3-Clause). Set TURN_URLS=turn:<your domain>:3478 and TURN_SECRET in .env.
+  coturn:
+    profiles: ["turn"]
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    command: >-
+      -n --log-file=stdout --listening-port=3478 --fingerprint --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:-change-me} --realm=${DOMAIN:-localhost}
+      --min-port=49160 --max-port=49200 --no-cli --no-tlsv1 --no-tlsv1_1
+volumes: { meet-db: {}, caddy-data: {} }

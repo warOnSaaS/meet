@@ -1,0 +1,8 @@
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy meet:8787
+}
+
+{$LIVEKIT_DOMAIN} {
+	reverse_proxy host.docker.internal:7880
+}

@@ -1,0 +1,12 @@
+{
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.mjs": { "includeFiles": "{public/**,server/**,package.json,wos-app.json,tools.json}", "maxDuration": 30 }
+  },
+  "rewrites": [
+    { "source": "/((?!ui/|app/|vendor/|icon\\.svg).*)", "destination": "/api/index?__p=/$1" }
+  ],
+  "headers": [
+    { "source": "/(.*)", "headers": [{ "key": "Permissions-Policy", "value": "camera=(self), microphone=(self), display-capture=(self)" }] }
+  ]
+}
