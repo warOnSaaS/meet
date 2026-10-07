@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/warOnSaaS/suite/main/packages/manifest/wos-app.schema.json",
+  "id": "meet",
+  "name": "Meetings",
+  "description": "Video meetings for small teams: direct calls for up to 4, computers in the call carry bigger ones, LiveKit when you have it.",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "requires": { "core": ">=0.1" },
+  "tools": "./tools.json",
+  "server": "./server.mjs",
+  "screens": "./public/app/meet.mjs",
+  "icon": "video",
+  "nav": { "label": "Meetings", "order": 40 },
+  "events": {
+    "emits": ["meet.meeting.created", "meet.meeting.scheduled", "meet.meeting.updated", "meet.meeting.cancelled", "meet.meeting.ended", "meet.participant.asked", "meet.participant.joined", "meet.participant.left", "meet.participant.denied", "meet.participant.media", "meet.participant.muted", "meet.participant.removed", "meet.participant.role", "meet.participant.hand", "meet.share.requested", "meet.share.started", "meet.share.stopped", "meet.chat.message", "meet.host.offered"],
+    "listens": []
+  },
+  "needs": {
+    "services": ["livekit (optional, compose profile meetings)", "turn (optional, coturn or LiveKit's built-in TURN)"],
+    "permissions": ["camera", "microphone", "display-capture"],
+    "desktop": ["participant host: runs host/host.mjs in the background, see docs/DESKTOP-HOST.md"],
+    "env": ["DATABASE_URL", "SESSION_SECRET", "PUBLIC_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "TURN_URLS", "TURN_SECRET", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+  },
+  "data": { "onDisable": "keep", "exports": ["meetings", "meeting_participants", "meeting_chat"] }
+}

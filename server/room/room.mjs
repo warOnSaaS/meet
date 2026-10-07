@@ -32,17 +32,19 @@ export function createRoom({ db, config }) {
   }
 
   // Long-poll: return as soon as something arrives, or after timeoutMs with nothing.
-  async function poll(peerRow, since, timeoutMs) {
+  // isGone: the caller hung up (stop asking the database for it).
+  async function poll(peerRow, since, timeoutMs, isGone = () => false) {
     const end = now() + timeoutMs;
     await touch(peerRow.peer_id);
     for (;;) {
       const msgs = await fetchFor(peerRow.meeting_id, peerRow.peer_id, since);
-      if (msgs.length || now() >= end) return msgs;
+      if (msgs.length || now() >= end || isGone()) return msgs;
       await new Promise((resolve) => {
         const t = setTimeout(done, Math.min(end - now(), db.dialect === 'postgres' ? 300 : 1000));
         function done() { clearTimeout(t); wake.off(peerRow.meeting_id, done); resolve(); }
         wake.on(peerRow.meeting_id, done);
       });
+      if (isGone()) return [];
       if (!(await db.get('SELECT peer_id FROM room_peers WHERE peer_id = ?', [peerRow.peer_id]))) return [{ id: since, from: 'server', type: 'gone', body: null }];
     }
   }

@@ -1,0 +1,1176 @@
+{
+  "$schema": "https://raw.githubusercontent.com/warOnSaaS/suite/main/packages/tools/tools.schema.json",
+  "app": "meet",
+  "version": 1,
+  "tools": [
+    {
+      "name": "meet.whoami",
+      "title": "Who am I",
+      "description": "Who you are signed in as, and whether you can start meetings here.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs",
+      "public": true
+    },
+    {
+      "name": "meet.create",
+      "title": "Start a meeting",
+      "description": "Start a meeting now. Returns the join link to share, and a host link that makes whoever opens it the host.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "What the meeting is called"
+          },
+          "waiting_room": {
+            "type": "boolean",
+            "description": "Hold guests in a waiting room until a host lets them in (default on)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "webinar"
+            ],
+            "description": "meeting, or webinar: a few speakers and many viewers"
+          },
+          "linked_record": {
+            "type": "string",
+            "description": "Optional link to a record in another app, for example crm:deal:42 or board:task:7"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.created"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.schedule",
+      "title": "Schedule a meeting",
+      "description": "Schedule a meeting for later. Returns the join link and a calendar invite (.ics text) to send.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "starts_at"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "What the meeting is called"
+          },
+          "starts_at": {
+            "type": "string",
+            "description": "When it starts, ISO 8601, for example 2026-10-12T15:00:00Z"
+          },
+          "duration_min": {
+            "type": "integer",
+            "description": "How long, in minutes (default 30)"
+          },
+          "waiting_room": {
+            "type": "boolean",
+            "description": "Hold guests until a host lets them in (default on)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "webinar"
+            ]
+          },
+          "linked_record": {
+            "type": "string",
+            "description": "Optional link to another app's record"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.scheduled"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.list",
+      "title": "List meetings",
+      "description": "List meetings: live ones first, then upcoming, then recent.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "include_ended": {
+            "type": "boolean",
+            "description": "Also list ended meetings"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.get",
+      "title": "Get a meeting",
+      "description": "Get one meeting by id or join link: title, time, status and settings. Anyone with the link can read this much.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs",
+      "public": true
+    },
+    {
+      "name": "meet.update",
+      "title": "Change a meeting",
+      "description": "Change a meeting: title, time, length, waiting room, webinar mode, or how media is carried.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "title": {
+            "type": "string",
+            "description": "New title"
+          },
+          "starts_at": {
+            "type": "string",
+            "description": "New start, ISO 8601"
+          },
+          "duration_min": {
+            "type": "integer"
+          },
+          "waiting_room": {
+            "type": "boolean",
+            "description": "Waiting room on or off"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "webinar"
+            ]
+          },
+          "media_pref": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "p2p",
+              "hosts",
+              "livekit"
+            ],
+            "description": "auto picks for you; the others force one way"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.updated"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.cancel",
+      "title": "Cancel a meeting",
+      "description": "Cancel a scheduled meeting and delete it with its chat.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "delete",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.cancelled"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.invite",
+      "title": "Make an invite",
+      "description": "Make an invitation: the join link, a short message to paste, and a calendar invite. It does not send email; the Email app or you send it.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Who it is for, to address the message"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.join",
+      "title": "Join a meeting",
+      "description": "Join a meeting by its link. Guests give a name and need no account. With a waiting room on, guests wait until a host admits them; call again with the same ticket to check.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "name": {
+            "type": "string",
+            "description": "Your name as others will see it (guests)"
+          },
+          "host_key": {
+            "type": "string",
+            "description": "The host key from a host link, which makes you the host"
+          },
+          "as": {
+            "type": "string",
+            "enum": [
+              "person",
+              "agent"
+            ],
+            "description": "agent: an AI agent joining by itself (shown with an agent badge)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.asked",
+        "meet.participant.joined"
+      ],
+      "test": "test/unit/tools.test.mjs",
+      "public": true
+    },
+    {
+      "name": "meet.leave",
+      "title": "Leave",
+      "description": "Leave the meeting. Others stay in the call.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.left"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.end",
+      "title": "End for everyone",
+      "description": "End the meeting for everyone.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.ended"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.list_waiting",
+      "title": "List the waiting room",
+      "description": "Who is in the waiting room, oldest first.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.admit",
+      "title": "Let someone in",
+      "description": "Let someone in from the waiting room. Use all: true to let everyone in.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Participant id"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Let everyone waiting in"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.joined"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.deny",
+      "title": "Turn someone away",
+      "description": "Turn someone away from the waiting room.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "participant"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Participant id"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.denied"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.list_participants",
+      "title": "List people",
+      "description": "Everyone admitted to the meeting, whether they are in the call now, and their mic, camera, screen and hand.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.room_status",
+      "title": "Call status",
+      "description": "How the call is carried right now (direct, by computers in the call, or by a media server), the people limit, the computers helping, and your own status.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.set_my_media",
+      "title": "Turn my mic or camera on or off",
+      "description": "Turn your own microphone or camera on or off. The first time, the browser asks the person to allow the camera and microphone; only they can click that. Granting camera and microphone permission is a browser prompt only the person can answer (ROADMAP 3.3).",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "audio": {
+            "type": "boolean",
+            "description": "Microphone on"
+          },
+          "video": {
+            "type": "boolean",
+            "description": "Camera on"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.media"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.mute_participant",
+      "title": "Mute someone",
+      "description": "Host: mute someone's microphone, or turn off their camera. Nobody can turn another person's mic or camera on; you can only ask.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Participant id"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Mute everyone except you"
+          },
+          "video": {
+            "type": "boolean",
+            "description": "Turn their camera off as well"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.muted"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.remove_participant",
+      "title": "Remove someone",
+      "description": "Host: remove someone from the meeting. They cannot rejoin with the same ticket.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "participant"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Participant id"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "delete",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.removed"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.set_role",
+      "title": "Change someone's role",
+      "description": "Host: make someone a co-host, a member again, or in a webinar a speaker or a viewer.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "participant",
+          "role"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Participant id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "cohost",
+              "member",
+              "guest",
+              "speaker",
+              "viewer"
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.role"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.lock",
+      "title": "Lock the meeting",
+      "description": "Host: lock the meeting so nobody new can join, or unlock it.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "locked"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Locked"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.updated"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.set_waiting_room",
+      "title": "Turn the waiting room on or off",
+      "description": "Host: turn the waiting room on or off. Turning it off lets everyone waiting in.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "on"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "on": {
+            "type": "boolean",
+            "description": "Waiting room on"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.updated"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.request_screen_share",
+      "title": "Ask to share a screen",
+      "description": "Ask someone (or yourself) to share their screen. Their screen shows a button; the person picks the screen or window in the browser's picker. Only a person can pick. Choosing which screen or window to share is the browser's picker, which only the person can use (ROADMAP 3.3).",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Who to ask; leave out for yourself"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.share.requested"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.set_sharing",
+      "title": "Start or stop sharing",
+      "description": "Record that you started or stopped sharing your screen. Stopping also asks your screen to stop the share.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "sharing"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "sharing": {
+            "type": "boolean",
+            "description": "Sharing now"
+          },
+          "participant": {
+            "type": "string",
+            "description": "Host only: stop someone else's share"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.share.started",
+        "meet.share.stopped"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.set_layout",
+      "title": "Grid or speaker view",
+      "description": "Choose how you see the call: grid (everyone the same size) or speaker (whoever talks is large).",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "layout"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "grid",
+              "speaker"
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.raise_hand",
+      "title": "Raise or lower my hand",
+      "description": "Raise or lower your hand. In a webinar, a raised hand asks the host to let you speak.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "raised"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "raised": {
+            "type": "boolean",
+            "description": "Hand up"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.hand"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.send_chat",
+      "title": "Send a chat message",
+      "description": "Send a message to everyone in the meeting chat.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "body"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "body": {
+            "type": "string",
+            "description": "The message"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.chat.message"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.list_chat",
+      "title": "Read the chat",
+      "description": "Read the meeting chat, oldest first. Pass after to get only newer messages.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "after": {
+            "type": "integer",
+            "description": "Only messages after this id"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.huddle",
+      "title": "Open a huddle",
+      "description": "The room API for other apps: open (or find) the live room for a record such as a Chat channel, with no waiting room, and join it. Chat huddles use this.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "for"
+        ],
+        "properties": {
+          "for": {
+            "type": "string",
+            "description": "The record the room belongs to, for example chat:channel:general"
+          },
+          "title": {
+            "type": "string",
+            "description": "Room title"
+          },
+          "name": {
+            "type": "string",
+            "description": "Your name, for guests"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.meeting.created"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.add_host",
+      "title": "Help carry this call",
+      "description": "Offer your computer to help carry this call. Returns the command to run (Node 22 or newer), or the desktop app does it for you. The computer forwards media it cannot see: it is end-to-end encrypted.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.host.offered"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.list_hosts",
+      "title": "List computers carrying the call",
+      "description": "The computers offered to carry this call, whether each is carrying it, its measured upload, and how many people it can take.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.export",
+      "title": "Export everything",
+      "description": "Export everything you host: meetings, who joined, and chat, as JSON.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.doctor",
+      "title": "Check calls can connect",
+      "description": "Check this server for calls: public address, UDP out, TURN, TLS, and the media server if one is set. Says in plain words what is wrong.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "admin",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.start_recording",
+      "title": "Start recording",
+      "description": "Ask everyone in the call to agree to recording. Recording starts only after the notice is shown and spoken to everyone, and each person's answer is recorded (ROADMAP F11). Not built yet. Planned for v1.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "human",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.stop_recording",
+      "title": "Stop recording",
+      "description": "Stop a recording. Not built yet. Planned for v1.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.get_transcript",
+      "title": "Get the transcript",
+      "description": "Read the transcript of a recorded meeting. Not built yet. Planned for v1.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.summarise",
+      "title": "Write meeting notes",
+      "description": "Write a summary, decisions and action items from the transcript, to the CRM record or the board. Not built yet. Planned for v1.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
+      "name": "meet.join_as_agent",
+      "title": "Join as an agent",
+      "description": "Have an AI agent join the call as a participant that listens and speaks. Not built yet. Planned for v1.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/tools.test.mjs"
+    }
+  ]
+}

@@ -154,7 +154,9 @@ export function planRoom(input) {
   for (let guard = 0; guard < 4 && chosen.length > 1; guard++) {
     const far = chosen.filter((h) => chosen.some((x) => pathMs(topo, chosen, h, x) > budget));
     if (!far.length) break;
-    const worst = far.sort((a, b) => maxPath(topo, chosen, b) - maxPath(topo, chosen, a))[0];
+    // Drop the host on the most slow paths (the far one), then the slowest.
+    const slow = (h) => chosen.filter((x) => pathMs(topo, chosen, h, x) > budget).length;
+    const worst = far.sort((a, b) => slow(b) - slow(a) || maxPath(topo, chosen, b) - maxPath(topo, chosen, a))[0];
     chosen = chosen.filter((h) => h !== worst);
     topo = topologyFor(chosen, o);
   }

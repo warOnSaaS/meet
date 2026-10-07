@@ -28,7 +28,7 @@ export async function handleMcp(req, res, { app, base, body, json }) {
       case 'ping':
         return reply({});
       case 'tools/list':
-        return reply({ tools: tools.map((t) => ({ name: t.name, description: t.description + (t.planned ? ' (planned)' : ''), inputSchema: t.input, annotations: { readOnlyHint: t.scope === 'read', destructiveHint: t.scope === 'delete' } })) });
+        return reply({ tools: tools.map((t) => ({ name: t.name, title: t.title, description: t.description + (t.confirm === 'human' ? ' A person must approve this before it runs.' : '') + (t.planned ? ' (planned)' : ''), inputSchema: t.input, annotations: { title: t.title, readOnlyHint: t.scope === 'read', destructiveHint: t.scope === 'delete', idempotentHint: t.scope === 'read', openWorldHint: false } })) });
       case 'tools/call': {
         try {
           const result = await app.callTool(m.params?.name, m.params?.arguments ?? {}, caller, base);

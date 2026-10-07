@@ -29,7 +29,7 @@ function devSecret() {
 // ICE servers handed to browsers. TURN with a shared secret uses the coturn "REST API" scheme: short-lived
 // credentials, so the secret never leaves the server.
 export function iceServers(config, who = 'guest') {
-  const out = [{ urls: config.stun }];
+  const out = config.stun.length ? [{ urls: config.stun }] : [];
   const t = config.turn;
   if (t) {
     if (t.secret) {

@@ -4,3 +4,7 @@ node_modules
 .env*
 .shots
 *.log
+.names
+data/
+.vercel
+test-results/

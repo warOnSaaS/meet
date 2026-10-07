@@ -108,7 +108,9 @@ export function createApp({ db, config }) {
     if (p === '/media/signal' && req.method === 'GET') {
       const since = Number(url.searchParams.get('since') ?? 0);
       const wait = Math.min(Number(url.searchParams.get('wait') ?? config.pollMs), config.serverless ? 8000 : 25000);
-      const msgs = await room.poll(peer, since, wait);
+      let gone = false;
+      res.on('close', () => { gone = true; });
+      const msgs = await room.poll(peer, since, wait, () => gone);
       return json(res, 200, { ok: true, msgs });
     }
     if (p === '/media/signal' && req.method === 'POST') {

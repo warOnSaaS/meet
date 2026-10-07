@@ -14,7 +14,17 @@ export class Signal {
     this.pending = new Map();
   }
 
-  on(type, fn) { (this.handlers.get(type) ?? this.handlers.set(type, []).get(type)).push(fn); return this; }
+  // Messages that arrive before anyone listens for their type (an offer that lands before the media engine
+  // exists) are kept for 30 s and handed over when a listener for that type is added.
+  on(type, fn) {
+    (this.handlers.get(type) ?? this.handlers.set(type, []).get(type)).push(fn);
+    const held = (this.early ?? []).filter((m) => m.type === type && Date.now() - m.at < 30000);
+    if (held.length) {
+      this.early = this.early.filter((m) => m.type !== type);
+      queueMicrotask(() => { for (const m of held) { try { fn(m.body, m); } catch (e) { console.error(e); } } });
+    }
+    return this;
+  }
 
   start() {
     if (this.useWs && typeof WebSocket !== 'undefined') this.openWs();
@@ -34,7 +44,14 @@ export class Signal {
         continue;
       }
       try { this.onMessage?.(m); } catch (e) { console.error(e); }
-      for (const fn of this.handlers.get(m.type) ?? []) {
+      const fns = this.handlers.get(m.type);
+      if (!fns?.length) {
+        this.early ??= [];
+        this.early.push({ ...m, at: Date.now() });
+        if (this.early.length > 500) this.early.shift();
+        continue;
+      }
+      for (const fn of [...fns]) {
         try { fn(m.body, m); } catch (e) { console.error(e); }
       }
     }

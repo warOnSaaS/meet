@@ -12,7 +12,9 @@ export class P2PEngine {
     this.kind = 'p2p';
     this.pcs = new Map();
     this.off = [];
-    const h = (b, m) => this.onSignal(m.from, b);
+    // Handle one message at a time, in order: an answer must not overtake its offer.
+    this.chain = Promise.resolve();
+    const h = (b, m) => { this.chain = this.chain.then(() => this.onSignal(m.from, b)).catch((e) => console.warn('[meet] p2p', e.message)); };
     signal.on('p2p', h);
     this.handler = h;
   }

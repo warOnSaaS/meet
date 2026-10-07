@@ -602,12 +602,38 @@ export const tools = [
   })),
 ];
 
+// Titles, as the button or menu item says it (sentence case).
+const TITLES = {
+  'meet.whoami': 'Who am I', 'meet.create': 'Start a meeting', 'meet.schedule': 'Schedule a meeting', 'meet.list': 'List meetings',
+  'meet.get': 'Get a meeting', 'meet.update': 'Change a meeting', 'meet.cancel': 'Cancel a meeting', 'meet.invite': 'Make an invite',
+  'meet.join': 'Join a meeting', 'meet.leave': 'Leave', 'meet.end': 'End for everyone', 'meet.list_waiting': 'List the waiting room',
+  'meet.admit': 'Let someone in', 'meet.deny': 'Turn someone away', 'meet.list_participants': 'List people', 'meet.room_status': 'Call status',
+  'meet.set_my_media': 'Turn my mic or camera on or off', 'meet.mute_participant': 'Mute someone', 'meet.remove_participant': 'Remove someone',
+  'meet.set_role': 'Change someone\'s role', 'meet.lock': 'Lock the meeting', 'meet.set_waiting_room': 'Turn the waiting room on or off',
+  'meet.request_screen_share': 'Ask to share a screen', 'meet.set_sharing': 'Start or stop sharing', 'meet.set_layout': 'Grid or speaker view',
+  'meet.raise_hand': 'Raise or lower my hand', 'meet.send_chat': 'Send a chat message', 'meet.list_chat': 'Read the chat', 'meet.huddle': 'Open a huddle',
+  'meet.add_host': 'Help carry this call', 'meet.list_hosts': 'List computers carrying the call', 'meet.export': 'Export everything',
+  'meet.doctor': 'Check calls can connect', 'meet.start_recording': 'Start recording', 'meet.stop_recording': 'Stop recording',
+  'meet.get_transcript': 'Get the transcript', 'meet.summarise': 'Write meeting notes', 'meet.join_as_agent': 'Join as an agent',
+};
+for (const t of tools) t.title = TITLES[t.name] ?? t.name;
+
 export const byName = new Map(tools.map((t) => [t.name, t]));
 
+// The catalogue in the suite's format (packages/tools in warOnSaaS/suite). tools.json is this, written to disk.
 export function catalogue() {
   return {
+    $schema: 'https://raw.githubusercontent.com/warOnSaaS/suite/main/packages/tools/tools.schema.json',
     app: 'meet',
     version: 1,
-    tools: tools.map(({ handler: _h, input, ...t }) => ({ ...t, input_schema: input })),
+    tools: tools.map((t) => ({
+      name: t.name, title: t.title,
+      description: t.description + (t.human ? ` ${t.human}` : '') + (t.planned ? ` Planned for ${t.planned}.` : ''),
+      input: { additionalProperties: false, ...t.input },
+      output: t.output ?? { type: 'object' },
+      scope: t.scope, confirm: t.confirm, emits: t.events ?? [],
+      test: t.planned ? 'test/unit/tools.test.mjs' : 'test/unit/tools.test.mjs',
+      ...(['meet.get', 'meet.join', 'meet.whoami'].includes(t.name) ? { public: true } : {}),
+    })),
   };
 }
