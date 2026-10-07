@@ -149,3 +149,30 @@ test('a host that is leaving hands its people to the other host first', async (t
   assert.equal(after.length, 1);
   assert.equal(after[0].load, 6);
 });
+
+test('without the meeting key the media is unreadable: what a host forwards is encrypted', async (t) => {
+  const s = await setup(t, { hosts: [{ name: 'Riley-desktop', upload: 40 }] });
+  await addPeople(s, 3);
+  // Avery's browser is handed a wrong key, as if it were a computer outside the meeting reading the stream.
+  const ctx = await s.browser.newContext({ viewport: { width: 1000, height: 700 }, permissions: ['camera', 'microphone'] });
+  await ctx.route('**/api/tools/meet.join', async (route) => {
+    const r = await route.fetch();
+    const d = await r.json();
+    if (d.result?.media) d.result.media.e2ee_key = 'A'.repeat(43);
+    await route.fulfill({ response: r, json: d });
+  });
+  const avery = await ctx.newPage();
+  await avery.goto(s.meeting.join_url);
+  await avery.fill('#jf input[name=name]', 'Avery');
+  await avery.click('#jf button[type=submit]');
+  await inCall(avery);
+  await Promise.all(s.pages.map((p) => waitFlowing(p, 3, 45000)));
+  await sleep(4000);
+  const a = await avery.evaluate(async () => { const s = await window.meetCall.snapshot(); return { e2ee: s.stats.e2ee, frames: s.tiles.filter((x) => !/\(you\)/.test(x.name)).map((x) => x.frames) }; });
+  const ok = await s.sam.evaluate(async () => (await window.meetCall.snapshot()).stats.e2ee);
+  console.log(`  wrong key: decrypted ${a.e2ee.dec}, refused ${a.e2ee.fail} (${JSON.stringify(a.e2ee.why)}), video frames shown ${a.frames.join(', ')}; with the key: decrypted ${ok.dec}, refused ${ok.fail}`);
+  assert.equal(a.e2ee.dec, 0, 'nothing decrypts with the wrong key');
+  assert.ok(a.e2ee.fail > 100, 'frames arrived but were refused');
+  assert.ok(a.frames.every((f) => f === 0), 'no video frame was shown');
+  assert.ok(ok.dec > 100);
+});

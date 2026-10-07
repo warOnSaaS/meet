@@ -44,7 +44,7 @@ Each call picks the first way that fits. The server works it out again whenever 
 |---|---|---|
 | Direct | Up to 4 people (`P2P_MAX`) | Nothing. Public STUN servers find each browser's address. A TURN relay (`TURN_URLS`) helps people behind strict firewalls; without one, they see a plain message saying a firewall blocks the call. |
 | Computers in the call | More than 4, and someone runs `npx github:warOnSaaS/meet host "<link>"` (or the desktop app) | Node 22, a computer that is plugged in, with good upload and steady connection. See [docs/DESKTOP-HOST.md](docs/DESKTOP-HOST.md). |
-| Media server | You set `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` | LiveKit (`docker compose --profile meetings up -d`, or LiveKit Cloud). |
+| Media server | You set `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` | LiveKit (`docker compose --profile meetings up -d`, or LiveKit Cloud). Encrypted end to end with the meeting's key. Tested against livekit-server 1.13.8: 3 people (with `P2P_MAX=2`) seeing and hearing each other 1.8 s after the third joined. |
 | Full | None of the above | The first 4 talk; anyone else sees why they are waiting and what would fix it. |
 
 Signalling (how browsers find each other) goes through this app's own server: a WebSocket where the server runs all the time, and long-polling where it cannot (Vercel). Media never passes through the app's server.
@@ -59,7 +59,7 @@ Signalling (how browsers find each other) goes through this app's own server: a 
 | What crosses between them | Only streams someone on the other side is watching, at the size they watch it. |
 | Video sizes | Each camera sends three sizes (simulcast). The person talking is shown large; the rest small. Audio from everyone in calls up to 12; in bigger calls, from the 6 most recent speakers. |
 | A computer leaving | Every person keeps a warm standby connection to a second computer, already connected and encrypted. If their computer stops answering for 3 seconds, they switch. A computer that is shutting down hands its people over first. |
-| Privacy | Browsers encrypt every audio and video frame with a key only the people in the meeting have (WebRTC encoded transforms, AES-GCM). The computers forward frames they cannot read. |
+| Privacy | Browsers encrypt every audio and video frame with the meeting's key (WebRTC encoded transforms, AES-GCM), which the app's server gives only to people it admits. The computers carrying the call, and LiveKit (its own E2EE with our key), forward frames they cannot read; a test hands one browser a wrong key and checks it decrypts nothing and shows no video. The app's own server stores the key, so whoever runs that server could read a call they also capture; it never sees the media itself. Direct calls are encrypted between the two browsers by WebRTC. |
 
 ## Tools
 
