@@ -20,7 +20,7 @@ if (cmd === 'serve') {
   const server = http.createServer((req, res) => app.handle(req, res));
   attachWs(server, app);
   const port = Number(flags.port ?? process.env.PORT ?? 8787);
-  server.listen(port, process.env.HOST ?? '0.0.0.0', () => console.log(`wOS Meetings on http://localhost:${port} (${db.dialect})`));
+  server.listen(port, process.env.HOST ?? '0.0.0.0', () => console.log(`wOS Meetings on http://localhost:${server.address().port} (${db.dialect})`));
   const stop = () => server.close(() => process.exit(0));
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);

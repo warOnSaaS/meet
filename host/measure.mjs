@@ -44,12 +44,15 @@ export async function measureUpload(base, token, { bytes = 1_500_000, rounds = 2
 export class Steadiness {
   constructor() { this.samples = []; }
   add(ms) { this.samples.push(ms); if (this.samples.length > 120) this.samples.shift(); }
+  // The median change between one round trip and the next: steady connections are near 0, and one slow
+  // reply does not count against a computer the way an average would.
   get jitterMs() {
-    const s = this.samples;
+    const s = this.samples.slice(-30);
     if (s.length < 3) return null;
-    let sum = 0;
-    for (let i = 1; i < s.length; i++) sum += Math.abs(s[i] - s[i - 1]);
-    return Math.round((sum / (s.length - 1)) * 10) / 10;
+    const d = [];
+    for (let i = 1; i < s.length; i++) d.push(Math.abs(s[i] - s[i - 1]));
+    d.sort((a, b) => a - b);
+    return Math.round(d[Math.floor(d.length / 2)] * 10) / 10;
   }
   get rttMs() { const s = [...this.samples].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; }
 }

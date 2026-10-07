@@ -21,6 +21,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 export function createApp({ db, config }) {
   const room = createRoom({ db, config });
   const app = { db, config, room };
+  const reports = new Map(); // host peer -> Map(reporter -> time): who said that host is gone
 
   const baseOf = (req) => config.publicUrl || `${req.headers['x-forwarded-proto'] ?? (req.socket?.encrypted ? 'https' : 'http')}://${req.headers['x-forwarded-host'] ?? req.headers.host}`;
 
@@ -132,11 +133,18 @@ export function createApp({ db, config }) {
       return json(res, 200, { ok: true, bytes: n });
     }
     // A browser lost its host. If that host has also gone quiet here, drop it now instead of waiting.
+    // Dropped when it has also gone quiet here for 3 s, or when two different computers in the call say so.
     if (p === '/media/report' && req.method === 'POST') {
       const b = await body(req);
       const h = b.dead && (await db.get("SELECT * FROM meet_peers WHERE peer_id = ? AND meeting_id = ? AND kind = 'host'", [b.dead, peer.meeting_id]));
-      if (h && Date.now() - Number(h.last_seen) > 4000) await room.leave(h.peer_id);
-      return json(res, 200, { ok: true, dropped: !!(h && Date.now() - Number(h.last_seen) > 4000) });
+      if (!h) return json(res, 200, { ok: true, dropped: false });
+      const by = reports.get(h.peer_id) ?? new Map();
+      by.set(peer.peer_id, Date.now());
+      for (const [k, t] of by) if (Date.now() - t > 10000) by.delete(k);
+      reports.set(h.peer_id, by);
+      const drop = Date.now() - Number(h.last_seen) > 3000 || by.size >= 2;
+      if (drop) { reports.delete(h.peer_id); await room.leave(h.peer_id); }
+      return json(res, 200, { ok: true, dropped: drop });
     }
     if (p === '/media/plan') return json(res, 200, { ok: true, plan: await room.currentPlan(peer.meeting_id) });
     if (p === '/media/livekit-token' && req.method === 'POST') {

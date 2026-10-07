@@ -44,6 +44,9 @@ export class Host {
     this.uses = new Map(); // local producer id -> count of consumers using it
     this.idle = new Map(); // origin id -> time it became unused
     this.hostRtt = {};
+    this.heard = new Map(); // other host -> last echo reply
+    this.rttSamples = new Map();
+    this.reported = new Map();
     this.steady = new Steadiness();
     this.started = Date.now();
     this.warmupMs = Number(flags.warmup ?? 60) * 1000;
@@ -77,10 +80,18 @@ export class Host {
     this.echo = dgram.createSocket('udp4');
     this.echo.on('message', (msg, r) => {
       const s = msg.toString();
+      // p:<the host pinged>|<time> comes back as r:<the host pinged>|<time>.
       if (s.startsWith('p:')) this.echo.send(`r:${s.slice(2)}`, r.port, r.address);
       else if (s.startsWith('r:')) {
         const [peer, t] = s.slice(2).split('|');
-        this.hostRtt[peer] = Math.round(performance.now() - Number(t));
+        // The median of the last 20 round trips, so one slow reply does not move the call.
+        const list = this.rttSamples.get(peer) ?? [];
+        list.push(performance.now() - Number(t));
+        if (list.length > 20) list.shift();
+        this.rttSamples.set(peer, list);
+        const sorted = [...list].sort((a, b) => a - b);
+        this.hostRtt[peer] = Math.round(sorted[Math.floor(sorted.length / 2)]);
+        this.heard.set(peer, Date.now());
       }
     });
     await new Promise((res) => this.echo.bind(0, '0.0.0.0', res));
@@ -104,6 +115,7 @@ export class Host {
 
     this.timers = [
       setInterval(() => this.tick().catch((e) => log('tick', e.message)), 2000),
+      setInterval(() => this.pingHosts(), 500),
       setInterval(() => this.publishDir(), 10000),
       setInterval(() => this.gcRemote(), 3000),
     ];
@@ -118,8 +130,9 @@ export class Host {
     if (this.upload == null) this.upload = this.flags['upload-mbps'] ? Number(this.flags['upload-mbps']) : null;
     const warm = Date.now() - this.started >= this.warmupMs && this.steady.samples.length >= 3 && this.upload != null;
     return {
-      name: this.name, uploadMbps: this.upload, cpuCores: cpu.cores, cpuLoad: cpu.load,
-      plugged: this.flags['assume-plugged'] ? true : await pluggedIn(), jitterMs: this.steady.jitterMs, rttMs: this.steady.rttMs, warm,
+      // --cpu-load states the load instead of measuring it (tests where several hosts share one computer).
+      name: this.name, uploadMbps: this.upload, cpuCores: cpu.cores, cpuLoad: this.flags['cpu-load'] != null ? Number(this.flags['cpu-load']) : cpu.load,
+      plugged: this.flags['assume-plugged'] ? true : await pluggedIn(), jitterMs: this.flags['jitter-ms'] != null ? Number(this.flags['jitter-ms']) : this.steady.jitterMs, rttMs: this.steady.rttMs, warm,
       rtt: { ...this.hostRtt }, echo: { ip: this.addr, port: this.echo?.address().port },
       load: this.load ?? null, version: 1,
     };
@@ -136,9 +149,24 @@ export class Host {
       log(`measured upload: ${this.upload} Mbit/s`);
     }
     // Ping the other hosts.
-    for (const [peer, info] of Object.entries(this.peerEchoes())) this.echo.send(`p:${this.peer}|${performance.now()}`, info.port, info.ip);
     this.load = await this.measureLoad();
     if (this.signal) await this.signal.post('/media/metrics', await this.metrics()).catch(() => {});
+  }
+
+  // Ping the other hosts twice a second. One linked to this host that has not answered for 2 s is
+  // reported to the server, which moves the call off it without waiting for its own timeout.
+  pingHosts() {
+    const now = Date.now();
+    for (const [peer, info] of Object.entries(this.peerEchoes())) {
+      this.echo.send(`p:${peer}|${performance.now()}`, info.port, info.ip);
+      if (!this.heard.has(peer)) this.heard.set(peer, now);
+      const quiet = now - this.heard.get(peer);
+      if (quiet > 2000 && this.links.has(peer) && now - (this.reported.get(peer) ?? 0) > 2000) {
+        this.reported.set(peer, now);
+        log(`host ${peer} stopped answering; telling the server`);
+        this.signal?.post('/media/report', { dead: peer }).catch(() => {});
+      }
+    }
   }
 
   peerEchoes() {

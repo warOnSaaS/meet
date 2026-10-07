@@ -72,6 +72,8 @@ npm install
 npm run dev                   # http://localhost:8787, with a /auth/dev sign-in for testing
 npm test                      # unit tests: planner, every tool over REST and MCP
 npm run test:e2e              # real calls in Chromium with fake cameras, and the parity check
+node test/load/big-call.mjs --hosts=4 --people=12 --kill   # the load test (heavy)
+node test/live/p2p-live.mjs https://meet.waronsaas.com     # a real call through a deployed site
 npm run shots                 # screenshots at 1440 and 390, light and dark, into .shots/
 npm run check                 # tools.json is current; no private names or em dashes
 ```
@@ -103,6 +105,23 @@ Against the deployed site (https://meet.waronsaas.com on Vercel, region pdx1, Ne
 | 2 people seeing and hearing each other | 4.5 s after the guest clicks Join (includes the host's click to let them in) |
 | 3 people, everyone sees and hears everyone | 5.3 s after the third person clicks Join |
 | A chat message reaching the others | 0.4 s |
+
+### Calls carried by computers in the call
+
+Everything below ran on one Mac (Apple silicon, 10 cores, 32 GB) on 2026-10-07: the app server, every participant host (real `meet host` processes running mediasoup) and every person (a headless Chromium with a fake camera and microphone). The Mac was shared with other work at the time.
+
+**What was simulated, and why.** Each host stated its upload speed (`--upload-mbps`), and in the load script also its CPU load (`--cpu-load=0.2`) and jitter (`--jitter-ms=3`), instead of measuring them, because all of them shared this one Mac and its loopback network: measuring would have measured the Mac, not the hosts. Media went over loopback, so there was no internet delay or loss. The traffic numbers are what the hosts really sent. Audio delay is measured from a tone switched on in the speaker's page to the moment each listener's page detects it in the received audio, on one shared clock; it leaves out the microphone and speaker hardware.
+
+| Test | People | Hosts | Result |
+|---|---|---|---|
+| One host (`test/e2e/hosts.test.mjs`) | 5, then 6 | 1 | The 5th person arriving moves the call from direct to the host in 2.2 to 3.2 s. A 6th person sees and hears everyone 1.2 s after joining. Audio delay through the host: 56 to 195 ms. The host sent 5.6 Mbit/s and received 6.8 to 7.6 Mbit/s. Every frame encrypted in the browser; 0 to 8 audio frames per person failed to decrypt around the switch, out of about 1,300. |
+| Two hosts, one killed with no warning | 6 | 2, linked | 3 people on each host, sending 2.3 to 3.9 Mbit/s each. After the kill, the browsers switch to their warm standby in 126 to 155 ms once they notice (they notice after 2 s of silence); every screen had all video and audio moving again 3.7 to 4.9 s after the kill (this includes 1.2 s the test spends confirming). |
+| Two hosts, one leaving politely (Ctrl+C) | 6 | 2 | It handed its 3 people over and exited in 91 to 143 ms. The longest gap in new video frames on any screen: 0.4 s. |
+| Star: more than 5 hosts (`test/load/big-call.mjs --hosts=7 --people=6 --upload=12`) | 6 | 6 of 7 (1 root relaying, 5 leaves) | Everyone sees and hears everyone. Audio delay 71 to 203 ms, including two hops between hosts. Killing a leaf carrying 3: all flowing again within 7.5 s. Killing the root: within 6.8 s (other hosts report it after 2 s of silence; before that fix it took 24 to 27 s). |
+| Largest this Mac held (`--hosts=4 --people=12 --kill`) | 12 | 2 used of 4 | Everyone sees and hears everyone; the Mac's CPU was 96 to 99% busy, almost all of it the 12 browsers encoding and decoding video (each host sent only about 6 Mbit/s). Most people saw and heard all within 2 to 6 s of joining; at full CPU some took 15 to 34 s. Audio delay at full CPU: 0.7 to 1.2 s. Killing a host carrying 6: the other 6 people were back in about 2 s, the 6 who moved in 10 to 15 s. |
+| Earlier run, same size (`--hosts=3 --people=12`) | 12 | 3, mesh | Everyone sees and hears everyone. Killing a host carrying 6: all back within 7.9 s. |
+
+What these numbers do not show: real networks (loss, jitter, NAT, distance), hosts on separate computers, and more than 12 people, which this Mac cannot run as browsers. Expect real calls to add the internet's delay to the audio numbers above. Bugs these tests found and fixed are in the commit history (for example, closing a host connection used to stop the person's own camera).
 
 ## Licence
 

@@ -122,3 +122,24 @@ test('the meeting can be forced to one way', () => {
   assert.equal(planRoom({ meeting: { media_pref: 'p2p' }, peers: [...people(5), host(1)] }).mode, 'capped');
   assert.equal(planRoom({ meeting: { media_pref: 'livekit' }, peers: people(2), livekit: true }).mode, 'livekit');
 });
+
+test('a host carrying a call is never dropped for a jumpy connection, it takes fewer people; a new one must be steady', () => {
+  const peers = [...people(6), host(1), host(2)];
+  const p1 = planRoom({ peers });
+  const jumpy = peers.map((x) => (x.peer === 'h_1' ? { ...x, metrics: { ...x.metrics, jitterMs: 400 } } : x));
+  const p2 = planRoom({ peers: jumpy, prev: p1 });
+  const h1 = (p) => p.hosts.find((h) => h.peer === 'h_1');
+  assert.ok(h1(p2), 'still carrying');
+  assert.ok(h1(p2).capacity < h1(p1).capacity, 'takes fewer people');
+  assert.ok(!planRoom({ peers: jumpy }).hosts.some((h) => h.peer === 'h_1'), 'a new jumpy host is not chosen');
+});
+
+test('the star keeps its root while round trips wobble, so hosts are not relinked', () => {
+  const hs = Array.from({ length: 7 }, (_, i) => host(i + 1, { uploadMbps: 14 }));
+  const p1 = planRoom({ peers: [...people(10), ...hs] });
+  assert.equal(p1.topology, 'star');
+  const wobble = hs.map((h) => (h.peer === p1.root ? h : { ...h, metrics: { ...h.metrics, rtt: Object.fromEntries(hs.map((x) => [x.peer, 1])) } }));
+  const p2 = planRoom({ peers: [...people(10), ...wobble], prev: p1 });
+  assert.equal(p2.root, p1.root);
+  assert.deepEqual(p2.links, p1.links);
+});

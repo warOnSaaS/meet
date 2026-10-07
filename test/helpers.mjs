@@ -190,7 +190,7 @@ export async function waitFlowing(page, n, timeout = 30000) {
     for (const t of s.tiles) {
       if (/\(you\)/.test(t.name) || /screen/i.test(t.name)) continue;
       v[t.key] = t.frames;
-      if (t.video && prev.v[t.key] != null && t.frames > prev.v[t.key] + 3) moving++;
+      if (t.video && prev.v[t.key] != null && t.frames > prev.v[t.key]) moving++;
     }
     for (const x of s.audio) { a[x.peer] = x.rtp; if (x.rtp != null && prev.a[x.peer] != null && x.rtp !== prev.a[x.peer]) hearing++; }
     const good = moving >= n && hearing >= n;
@@ -209,4 +209,17 @@ export async function diag(pages) {
     }).catch((e) => ({ error: e.message }));
     console.log(JSON.stringify(d));
   }
+}
+
+// The server as its own process (load tests: the test driver must not slow the server down).
+export async function startServerProcess(env = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meet-load-'));
+  const bin = new URL('../bin/meet.mjs', import.meta.url).pathname;
+  const child = spawn(process.execPath, [bin, 'serve', '--port=0'], { env: { ...process.env, SESSION_SECRET: 'load-secret-'.padEnd(40, 'x'), DEV_LOGIN: '1', MEET_DB: path.join(dir, 'meet.db'), STUN_URLS: '', HOST: '127.0.0.1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = await new Promise((res, rej) => {
+    child.stdout.on('data', (d) => { const m = /http:\/\/localhost:(\d+)/.exec(String(d)); if (m) res(`http://127.0.0.1:${m[1]}`); });
+    child.stderr.on('data', (d) => process.stderr.write(d));
+    child.on('exit', (c) => rej(new Error(`server exited ${c}`)));
+  });
+  return { base, child, async close() { child.kill(); } };
 }

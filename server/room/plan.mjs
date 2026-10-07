@@ -28,14 +28,17 @@ export const DEFAULTS = {
   maxPathMsWebinar: 1500, // webinar viewers tolerate more delay
 };
 
-export function hostEligible(h, o = DEFAULTS) {
+// carrying: the host is in the current plan, or was ready in it. A jumpy connection then only lowers how
+// many people it takes (hostCapacity), because dropping it would break a call that works; a new host has
+// to meet the full bar to be chosen.
+export function hostEligible(h, o = DEFAULTS, carrying = false) {
   const m = h.metrics ?? {};
   if (h.kind !== 'host' || h.draining) return { ok: false, why: h.draining ? 'handing off' : 'not a host' };
   if (!['desktop', 'cli'].includes(h.client)) return { ok: false, why: 'only the desktop app or the command line can carry a call' };
   if (m.plugged === false) return { ok: false, why: 'on battery' };
-  if (!m.warm) return { ok: false, why: 'still measuring the connection' };
+  if (!m.warm && !carrying) return { ok: false, why: 'still measuring the connection' };
   if (!(m.uploadMbps >= o.minUploadMbps)) return { ok: false, why: `upload under ${o.minUploadMbps} Mbit/s` };
-  if (m.jitterMs > o.maxJitterMs) return { ok: false, why: 'connection too jumpy' };
+  if (m.jitterMs > o.maxJitterMs && !carrying) return { ok: false, why: 'connection too jumpy' };
   return { ok: true };
 }
 
@@ -43,7 +46,8 @@ export function hostCapacity(h, links, perViewer, o = DEFAULTS) {
   const up = (h.metrics?.uploadMbps ?? 0) * o.usableUpload;
   const cpu = h.metrics?.cpuLoad ?? 0;
   const cpuFactor = cpu > 0.85 ? 0.5 : cpu > 0.6 ? 0.8 : 1;
-  const usable = up * cpuFactor - links * o.perLinkMbps;
+  const jitterFactor = h.metrics?.jitterMs > o.maxJitterMs ? 0.6 : 1;
+  const usable = up * cpuFactor * jitterFactor - links * o.perLinkMbps;
   return Math.max(0, Math.floor(usable / perViewer));
 }
 
@@ -55,7 +59,9 @@ const score = (h, others) => {
 };
 
 // Links each host keeps for a set of hosts. Mesh: everyone; star: leaves to the root.
-export function topologyFor(hosts, o = DEFAULTS) {
+// prevRoot: the root last time. It stays root unless another host's worst round trip is clearly better
+// (30 ms and a third), because changing the root relinks every host.
+export function topologyFor(hosts, o = DEFAULTS, prevRoot = null) {
   if (hosts.length <= 1) return { topology: hosts.length ? 'single' : null, root: hosts[0]?.peer ?? null, links: [] };
   if (hosts.length <= o.meshMaxHosts) {
     const links = [];
@@ -68,6 +74,11 @@ export function topologyFor(hosts, o = DEFAULTS) {
     const worst = Math.max(...hosts.map((h) => rtt(c, h)));
     const s = score(c, hosts);
     if (!best || worst < best.worst || (worst === best.worst && s > best.s)) best = { c, worst, s };
+  }
+  const keep = prevRoot && hosts.find((h) => h.peer === prevRoot);
+  if (keep) {
+    const worstKeep = Math.max(...hosts.map((h) => rtt(keep, h)));
+    if (!(best.worst < worstKeep - 30 && best.worst < worstKeep * 0.67)) best = { c: keep };
   }
   const root = best.c.peer;
   return { topology: 'star', root, links: hosts.filter((h) => h.peer !== root).map((h) => [root, h.peer]) };
@@ -95,7 +106,9 @@ export function planRoom(input) {
   const perViewer = n ? (viewers * o.perWebinarViewerMbps + (n - viewers) * o.perViewerMbps) / n : o.perViewerMbps;
 
   const peersInfo = Object.fromEntries((input.peers ?? []).map((p) => [p.peer, { pid: p.participantId ?? null, name: p.name ?? null, kind: p.kind, role: p.role ?? null }]));
-  const hostStatus = Object.fromEntries(allHosts.map((h) => [h.peer, hostEligible(h, o)]));
+  // Hosts carrying the call, or judged ready last time, keep the slack (see hostEligible).
+  const trusted = new Set([...(prev?.hosts ?? []).map((h) => h.peer), ...Object.entries(prev?.hostStatus ?? {}).filter(([, v]) => v.ok).map(([k]) => k)]);
+  const hostStatus = Object.fromEntries(allHosts.map((h) => [h.peer, hostEligible(h, o, trusted.has(h.peer))]));
   const hostEchoes = allHosts.filter((h) => h.metrics?.echo?.port).map((h) => ({ peer: h.peer, echo: h.metrics.echo }));
   const base = { peers: peersInfo, hostStatus, hostEchoes, p2p: [], hosts: [], links: [], topology: null, root: null, assign: {}, capped: [], limit: 0, message: null };
 
@@ -120,8 +133,9 @@ export function planRoom(input) {
   // Path delay: a host whose round trip to the others would push a path over budget is not used.
   const budget = webinar ? o.maxPathMsWebinar : o.maxPathMs;
 
+  const prevRoot = prev?.root ?? null;
   const capOf = (hs) => {
-    const t = topologyFor(hs, o);
+    const t = topologyFor(hs, o, prevRoot);
     const linkCount = (h) => t.links.filter((l) => l.includes(h.peer)).length;
     return hs.reduce((s, h) => s + hostCapacity(h, linkCount(h), perViewer, o), 0);
   };
@@ -149,16 +163,18 @@ export function planRoom(input) {
   k = Math.max(k, minK);
 
   let chosen = eligible.slice(0, k);
-  let topo = topologyFor(chosen, o);
+  let topo = topologyFor(chosen, o, prevRoot);
   // Re-parent: drop hosts that are too far from the rest, and recompute.
+  // Hosts already carrying the call get twice the budget, so a slow moment does not reshuffle it.
+  const budgetOf = (h) => budget * (prevHosts.has(h.peer) ? 2 : 1);
   for (let guard = 0; guard < 4 && chosen.length > 1; guard++) {
-    const far = chosen.filter((h) => chosen.some((x) => pathMs(topo, chosen, h, x) > budget));
+    const far = chosen.filter((h) => chosen.some((x) => pathMs(topo, chosen, h, x) > Math.max(budgetOf(h), budgetOf(x))));
     if (!far.length) break;
     // Drop the host on the most slow paths (the far one), then the slowest.
-    const slow = (h) => chosen.filter((x) => pathMs(topo, chosen, h, x) > budget).length;
+    const slow = (h) => chosen.filter((x) => pathMs(topo, chosen, h, x) > Math.max(budgetOf(h), budgetOf(x))).length;
     const worst = far.sort((a, b) => slow(b) - slow(a) || maxPath(topo, chosen, b) - maxPath(topo, chosen, a))[0];
     chosen = chosen.filter((h) => h !== worst);
-    topo = topologyFor(chosen, o);
+    topo = topologyFor(chosen, o, prevRoot);
   }
 
   const linkCount = (peer) => topo.links.filter((l) => l.includes(peer)).length;
