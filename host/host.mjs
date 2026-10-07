@@ -169,7 +169,9 @@ export class Host {
   // ---------- the plan: which hosts link to which ----------
 
   applyPlan(plan) {
+    const newPeers = Object.keys(plan.peers ?? {}).some((p) => !this.plan?.peers?.[p]);
     this.plan = plan;
+    if (newPeers) this.publishDir();
     const mine = new Set((plan.links ?? []).filter((l) => l.includes(this.peer)).map((l) => (l[0] === this.peer ? l[1] : l[0])));
     for (const [peer, l] of this.links) if (!mine.has(peer)) this.closeLink(peer, l);
     for (const peer of mine) if (!this.links.has(peer) && this.peer < peer) this.openLink(peer).catch((e) => log(`link to ${peer} failed: ${e.message}`));
@@ -266,10 +268,14 @@ export class Host {
 
   // ---------- directory and speaking levels ----------
 
+  ownDir() {
+    return [...this.origin.entries()].filter(([, o]) => !o.standby).map(([id, o]) => ({ id, owner: o.owner, source: o.source, kind: o.kind, paused: o.producer.paused }));
+  }
+
   publishDir() {
     clearTimeout(this.dirT);
     this.dirT = setTimeout(() => {
-      const producers = [...this.origin.entries()].filter(([, o]) => !o.standby).map(([id, o]) => ({ id, owner: o.owner, source: o.source, kind: o.kind, paused: o.producer.paused }));
+      const producers = this.ownDir();
       this.dirs.set(this.peer, producers);
       this.signal?.send('*', 'dir', { producers });
     }, 30);
@@ -293,7 +299,12 @@ export class Host {
 
   async rpc(method, d, from) {
     switch (method) {
-      case 'caps': return { rtpCapabilities: this.router.rtpCapabilities, name: this.name };
+      case 'caps': {
+        // Everything this host knows is in the call, so a browser that just arrived can ask for it now.
+        const dirs = Object.fromEntries([...this.dirs.entries()].filter(([h]) => h !== this.peer));
+        dirs[this.peer] = this.ownDir();
+        return { rtpCapabilities: this.router.rtpCapabilities, name: this.name, dirs };
+      }
       case 'transport': {
         const t = await this.router.createWebRtcTransport({ webRtcServer: this.webRtcServer, enableUdp: true, enableTcp: true, preferUdp: true, initialAvailableOutgoingBitrate: 1_000_000, appData: { owner: from, dir: d.dir } });
         this.client(from).transports.set(t.id, t);

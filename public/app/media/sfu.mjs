@@ -74,7 +74,8 @@ export class SfuEngine {
   async connect(host, role) {
     const c = { host, role, consumers: new Map(), producers: {}, ok: false, rr: { n: -1, at: Date.now() }, badSince: null };
     this.conns.set(host, c);
-    const { rtpCapabilities } = await this.signal.request(host, 'caps');
+    const { rtpCapabilities, dirs } = await this.signal.request(host, 'caps');
+    for (const [h, list] of Object.entries(dirs ?? {})) if (!this.dir.has(h) || h === host) this.dir.set(h, list);
     c.device = new Device();
     await c.device.load({ routerRtpCapabilities: rtpCapabilities });
     const extra = needsInsertableFlag() ? { encodedInsertableStreams: true } : undefined;

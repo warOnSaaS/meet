@@ -347,7 +347,7 @@ export const tools = [
       const hosts = (await ctx.db.all("SELECT * FROM meet_peers WHERE meeting_id = ? AND kind = 'host'", [m.id])).map((h) => {
         const met = h.metrics ? JSON.parse(h.metrics) : {};
         const inPlan = plan?.hosts?.find((x) => x.peer === h.peer_id);
-        return { peer: h.peer_id, name: met.name ?? 'A computer', client: h.client, upload_mbps: met.uploadMbps ?? null, carrying: !!inPlan, capacity: inPlan?.capacity ?? null, load: inPlan?.load ?? null, status: plan?.hostStatus?.[h.peer_id]?.ok ? 'ready' : plan?.hostStatus?.[h.peer_id]?.why ?? 'measuring' };
+        return { peer: h.peer_id, name: met.name ?? 'A computer', client: h.client, upload_mbps: met.uploadMbps ?? null, sending_mbps: met.load?.sendMbps ?? null, receiving_mbps: met.load?.recvMbps ?? null, links: met.load?.links ?? 0, carrying: !!inPlan, capacity: inPlan?.capacity ?? null, load: inPlan?.load ?? null, status: plan?.hostStatus?.[h.peer_id]?.ok ? 'ready' : plan?.hostStatus?.[h.peer_id]?.why ?? 'measuring' };
       });
       const out = {
         meeting: meetingOut(ctx, m), you: partOut(p), mode: plan?.mode ?? 'idle', summary: describePlan(plan),

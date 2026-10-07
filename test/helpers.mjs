@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 
 export async function startServer(env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meet-test-'));
@@ -91,3 +92,85 @@ export async function waitForMedia(page, n, timeout = 30000) {
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- participant hosts ----------
+
+
+// Start a participant host process for a meeting, the way a person would with the command from
+// "Help carry this call". Flags make it ready at once (no one minute warm-up) with a stated upload.
+export async function startHost(base, meeting, ticket, { name = 'host', upload = 40, extra = [] } = {}) {
+  const r = await api(base, 'meet.add_host', { meeting }, { ticket });
+  const bin = new URL('../bin/meet.mjs', import.meta.url).pathname;
+  const child = spawn(process.execPath, [bin, 'host', r.host_url, '--local', '--warmup=0', `--upload-mbps=${upload}`, '--assume-plugged', `--name=${name}`, ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const lines = [];
+  const onData = (d) => { for (const l of String(d).split('\n').filter(Boolean)) { lines.push(l); if (process.env.MEET_HOST_LOG) console.log(`[${name}] ${l}`); } };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  return { child, lines, name, kill: (sig = 'SIGKILL') => child.kill(sig), exited: new Promise((res) => child.on('exit', res)) };
+}
+
+// Wait until the server says this many computers are ready to carry the call.
+export async function waitHostsReady(base, meeting, ticket, n, timeout = 30000) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    const s = await api(base, 'meet.list_hosts', { meeting }, { ticket });
+    if (s.hosts.filter((h) => h.status === 'ready').length >= n) return s;
+    if (Date.now() > end) throw new Error(`hosts not ready: ${JSON.stringify(s.hosts)}`);
+    await sleep(500);
+  }
+}
+
+// The meeting ticket a page holds (for calling tools as that person from the test).
+export const ticketOf = (page) => page.evaluate(() => sessionStorage.getItem(Object.keys(sessionStorage).find((k) => k.startsWith('meet:ticket:'))));
+
+// ---------- audio delay ----------
+
+// Give every page a generated microphone (silence, with a tone we switch on), and a detector on each
+// received audio stream that notes when a tone starts. All pages run on this computer, so they share a clock.
+export async function installToneProbe(page) {
+  await page.evaluate(async () => {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator(); osc.frequency.value = 880;
+    const gain = ctx.createGain(); gain.gain.value = 0;
+    const dest = ctx.createMediaStreamDestination();
+    osc.connect(gain).connect(dest); osc.start();
+    const track = dest.stream.getAudioTracks()[0];
+    const call = window.meetCall;
+    call.local.mic = track; call.audioOn = true;
+    await call.engine?.setTrack('mic', track);
+    const heard = [];
+    const watching = new Map();
+    const watch = () => {
+      for (const [peer, a] of call.audios) {
+        if (watching.has(peer) || !a.srcObject) continue;
+        const src = ctx.createMediaStreamSource(a.srcObject);
+        const an = ctx.createAnalyser(); an.fftSize = 256; src.connect(an);
+        watching.set(peer, { an, buf: new Float32Array(256), on: false });
+      }
+      for (const [peer, w] of watching) {
+        w.an.getFloatTimeDomainData(w.buf);
+        let s = 0; for (const v of w.buf) s += v * v;
+        const loud = Math.sqrt(s / w.buf.length) > 0.05;
+        if (loud && !w.on) heard.push({ peer, at: performance.timeOrigin + performance.now() });
+        w.on = loud;
+      }
+    };
+    setInterval(watch, 2);
+    window.meetTone = {
+      beep(ms = 300) { const at = performance.timeOrigin + performance.now(); gain.gain.setValueAtTime(0.8, ctx.currentTime); gain.gain.setValueAtTime(0, ctx.currentTime + ms / 1000); return at; },
+      heard,
+    };
+  });
+}
+
+// One beep from `speaker`; returns each listener's delay in ms (null if not heard within 3 s).
+export async function measureAudioDelay(speaker, listeners) {
+  const speakerPeer = await speaker.evaluate(() => window.meetCall.peer);
+  const before = await Promise.all(listeners.map((p) => p.evaluate(() => window.meetTone.heard.length)));
+  const at = await speaker.evaluate(() => window.meetTone.beep());
+  await sleep(3000);
+  return Promise.all(listeners.map(async (p, i) => {
+    const h = await p.evaluate(([n, peer]) => window.meetTone.heard.slice(n).filter((x) => x.peer === peer), [before[i], speakerPeer]);
+    return h.length ? Math.round(h[0].at - at) : null;
+  }));
+}
