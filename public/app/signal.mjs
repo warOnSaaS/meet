@@ -118,9 +118,19 @@ export class Signal {
     const rid = `${Date.now().toString(36)}.${++this.rpcId}`;
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => { this.pending.delete(rid); reject(Object.assign(new Error(`${method} timed out`), { code: 'timeout' })); }, timeoutMs);
-      this.pending.set(rid, { resolve, reject, t });
+      this.pending.set(rid, { resolve, reject, t, to });
       this.send(to, 'rpc', { rid, method, data });
     });
+  }
+
+  // A peer is gone: fail every request waiting on it now, instead of when each times out.
+  failTo(peer) {
+    for (const [rid, p] of this.pending) {
+      if (p.to !== peer) continue;
+      this.pending.delete(rid);
+      clearTimeout(p.t);
+      p.reject(Object.assign(new Error('That computer left the call.'), { code: 'gone' }));
+    }
   }
 
   // Serve requests: fn(method, data, from) returns the reply data or throws.

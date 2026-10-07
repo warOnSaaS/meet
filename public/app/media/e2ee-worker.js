@@ -12,7 +12,8 @@ async function setKey(raw) {
 }
 
 const clearBytes = (kind, frame) => (kind === 'audio' ? 1 : frame.type === 'key' ? 10 : 3);
-const stats = { enc: 0, dec: 0, fail: 0 };
+const stats = { enc: 0, dec: 0, fail: 0, why: {} };
+const failed = (kind, why) => { stats.fail++; const k = `${kind}:${why}`; stats.why[k] = (stats.why[k] ?? 0) + 1; };
 
 function encryptor(kind) {
   return new TransformStream({
@@ -35,7 +36,8 @@ function decryptor(kind) {
   return new TransformStream({
     async transform(frame, ctl) {
       const data = new Uint8Array(frame.data);
-      if (!key || data.length < 14 || data[data.length - 1] !== MARK) { stats.fail++; return; }
+      if (!key) return failed(kind, 'no key');
+      if (data.length < 14 || data[data.length - 1] !== MARK) return failed(kind, data.length < 14 ? 'short' : 'not encrypted');
       const n = Math.min(clearBytes(kind, frame), data.length - 13);
       const iv = data.subarray(data.length - 13, data.length - 1);
       try {
@@ -45,7 +47,7 @@ function decryptor(kind) {
         frame.data = out.buffer;
         stats.dec++;
         ctl.enqueue(frame);
-      } catch { stats.fail++; }
+      } catch { failed(kind, 'bad tag'); }
     },
   });
 }

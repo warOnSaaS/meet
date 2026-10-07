@@ -174,3 +174,39 @@ export async function measureAudioDelay(speaker, listeners) {
     return h.length ? Math.round(h[0].at - at) : null;
   }));
 }
+
+// Wait until `n` remote videos are decoding new frames and `n` remote audio streams are receiving packets
+// right now. (A frozen live video still advances currentTime, so frames and packets are what count.)
+export async function waitFlowing(page, n, timeout = 30000) {
+  await page.evaluate(() => { delete window.__flow; });
+  await page.waitForFunction((n) => {
+    const s = window.meetCall?.view();
+    if (!s) return false;
+    const now = performance.now();
+    const prev = window.__flow;
+    if (!prev || now - prev.at < 600) { if (!prev) window.__flow = { at: now, v: {}, a: {} }; if (!prev) return false; }
+    let moving = 0, hearing = 0;
+    const v = {}, a = {};
+    for (const t of s.tiles) {
+      if (/\(you\)/.test(t.name) || /screen/i.test(t.name)) continue;
+      v[t.key] = t.frames;
+      if (t.video && prev.v[t.key] != null && t.frames > prev.v[t.key] + 3) moving++;
+    }
+    for (const x of s.audio) { a[x.peer] = x.rtp; if (x.rtp != null && prev.a[x.peer] != null && x.rtp !== prev.a[x.peer]) hearing++; }
+    const good = moving >= n && hearing >= n;
+    if (now - prev.at >= 600) window.__flow = { at: now, v, a, run: good ? (prev.run ?? 0) + 1 : 0 };
+    return good && window.__flow.run >= 2;
+  }, n, { timeout, polling: 200 });
+}
+
+// What each page has, for a failing test.
+export async function diag(pages) {
+  for (const p of pages) {
+    const d = await p.evaluate(async () => {
+      const c = window.meetCall;
+      const s = await c.snapshot();
+      return { me: c.me.display_name, peer: c.peer, mode: s.mode, engine: s.engine, tiles: s.tiles.map((t) => `${t.name}:${t.video ? `${t.w}x${t.h}@${t.t.toFixed(1)}` : 'none'}`), audio: s.audio.map((a) => `${a.peer}:${a.t.toFixed(1)}`), stats: s.stats, assign: c.plan?.assign?.[c.peer], dir: c.engine?.dir ? Object.fromEntries([...c.engine.dir].map(([h, l]) => [h, l.length])) : null };
+    }).catch((e) => ({ error: e.message }));
+    console.log(JSON.stringify(d));
+  }
+}

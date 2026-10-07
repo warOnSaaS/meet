@@ -33,7 +33,7 @@ export class SfuEngine {
       this.listen('ms', (d, m) => this.onHostEvent(m.from, d)),
       this.listen('peer-left', (d) => { if (this.conns.has(d.peer)) this.hostLost(d.peer, 'left'); this.dir.delete(d.peer); this.reconcile(); }),
     ];
-    this.watchT = setInterval(() => this.watch(), 1000);
+    this.watchT = setInterval(() => this.watch(), 500);
   }
 
   listen(type, fn) {
@@ -104,7 +104,9 @@ export class SfuEngine {
   async makeStandby(host) {
     const c = await this.connect(host, 'standby');
     if (this.canPublish && this.local.mic) {
-      const p = await this.produce(c, 'mic', this.local.mic, true);
+      // Its own copy of the microphone: pausing the standby must not mute the real one.
+      c.standbyTrack = this.local.mic.clone();
+      const p = await this.produce(c, 'mic', c.standbyTrack, true);
       p.pause();
       await this.signal.request(host, 'pause_producer', { id: p.id }).catch(() => {});
       // A paused loopback of that stream warms the receiving side too.
@@ -120,12 +122,19 @@ export class SfuEngine {
     this.onEvent?.('primary', c.host);
     await this.signal.request(c.host, 'activate', {});
     if (c.loop) { c.loop.close(); this.signal.request(c.host, 'close_consumer', { id: c.loop.id }).catch(() => {}); c.loop = null; }
-    if (c.producers.mic) { c.producers.mic.resume(); await this.signal.request(c.host, 'resume_producer', { id: c.producers.mic.id }); }
+    if (c.producers.mic) {
+      // Back to the real microphone, then let the host forward it.
+      if (this.local.mic && c.producers.mic.track !== this.local.mic) await c.producers.mic.replaceTrack({ track: this.local.mic });
+      c.standbyTrack?.stop(); c.standbyTrack = null;
+      c.producers.mic.resume();
+      await this.signal.request(c.host, 'resume_producer', { id: c.producers.mic.id });
+    }
     if (this.canPublish) for (const s of ['mic', 'cam', 'screen']) if (this.local[s] && !c.producers[s]) await this.produce(c, s, this.local[s]);
   }
 
   async produce(c, source, track, standby = false) {
-    const opts = { track, appData: { source, standby } };
+    // The tracks are ours: closing a connection to a host must never stop the camera or microphone.
+    const opts = { track, appData: { source, standby }, stopTracks: false, disableTrackOnPause: standby };
     if (source === 'cam') { opts.encodings = CAM_ENCODINGS; opts.codecOptions = { videoGoogleStartBitrate: 800 }; }
     if (source === 'screen') opts.encodings = [{ maxBitrate: 2_000_000 }];
     if (source === 'mic') opts.codecOptions = { opusDtx: true, opusFec: true };
@@ -138,6 +147,7 @@ export class SfuEngine {
   closeConn(c) {
     if (!this.dead.has(c.host)) this.signal.request(c.host, 'bye', {}).catch(() => {});
     for (const [pid, x] of c.consumers) this.onTrackGone?.({ peer: x.owner, source: x.source, producerId: pid });
+    c.standbyTrack?.stop();
     try { c.send?.close(); } catch {}
     try { c.recv?.close(); } catch {}
     this.conns.delete(c.host);
@@ -151,6 +161,7 @@ export class SfuEngine {
       for (const c of this.conns.values()) {
         const p = c.producers[source];
         if (c.role === 'standby' && source !== 'mic') continue;
+        if (c.role === 'standby' && track && p && !p.closed) { c.standbyTrack?.stop(); c.standbyTrack = track.clone(); await p.replaceTrack({ track: c.standbyTrack }); continue; }
         if (track && p && !p.closed) { await p.replaceTrack({ track }); continue; }
         if (!track && p) { p.close(); delete c.producers[source]; this.signal.request(c.host, 'close_producer', { id: p.id }).catch(() => {}); continue; }
         if (track && c.send && this.canPublish) await this.produce(c, source, track, c.role === 'standby');
@@ -225,19 +236,28 @@ export class SfuEngine {
 
   // ---------- noticing a host has gone ----------
 
-  // The primary host answers our microphone stream with RTCP reports about once a second. If those stop for
-  // 3 s, or the connection says it failed, the host is gone: switch to the standby now and tell the server.
+  // A host is gone when nothing at all has arrived from it for 2 s while we receive streams from it (audio
+  // keeps sending small packets even in silence), or when it stops answering what we send for 3 s, or when
+  // the connection says it failed. Then switch to the standby at once and tell the server.
   async watch() {
     const c = this.primary;
-    if (!c?.send || this.switching) return;
+    if (!c?.recv || this.switching) return;
     let stalled = false;
+    const now = Date.now();
     try {
-      const stats = await c.send.getStats();
-      let n = null;
-      stats.forEach((s) => { if (s.type === 'remote-inbound-rtp' && s.kind === 'audio') n = (s.roundTripTimeMeasurements ?? 0) + (s.packetsLost ?? 0) * 0; });
-      if (n != null) {
-        if (n !== c.rr.n) c.rr = { n, at: Date.now() };
-        else if (Date.now() - c.rr.at > 3000 && this.local.mic) stalled = true;
+      if (c.consumers.size) {
+        let got = 0;
+        (await c.recv.getStats()).forEach((s) => { if (s.type === 'inbound-rtp') got += s.packetsReceived ?? 0; });
+        if (got !== c.inbound?.n) c.inbound = { n: got, at: now };
+        else if (now - c.inbound.at > 2000) stalled = true;
+      } else c.inbound = null;
+      if (c.send) {
+        let n = null;
+        (await c.send.getStats()).forEach((s) => { if (s.type === 'remote-inbound-rtp') n = (n ?? 0) + (s.roundTripTimeMeasurements ?? 0); });
+        if (n != null) {
+          if (n !== c.rr.n) c.rr = { n, at: now };
+          else if (now - c.rr.at > 3000 && (this.local.mic || this.local.cam)) stalled = true;
+        }
       }
     } catch {}
     const broken = c.badSince && Date.now() - c.badSince > 1000;
@@ -249,6 +269,7 @@ export class SfuEngine {
     this.dead.add(host);
     setTimeout(() => this.dead.delete(host), 60000);
     this.onEvent?.('host-lost', { host, why });
+    this.signal.failTo(host);
     this.signal.post('/media/report', { dead: host }).catch(() => {});
     const c = this.conns.get(host);
     if (!c) return;

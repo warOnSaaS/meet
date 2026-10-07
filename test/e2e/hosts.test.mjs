@@ -2,7 +2,7 @@
 // browsers with fake cameras. Media is encrypted end to end in the browsers; the hosts forward it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, launch, joinAs, inCall, waitForMedia, api, startHost, waitHostsReady, ticketOf, installToneProbe, measureAudioDelay, sleep } from '../helpers.mjs';
+import { startServer, launch, joinAs, inCall, waitForMedia, api, startHost, waitHostsReady, ticketOf, installToneProbe, measureAudioDelay, waitFlowing, diag, sleep } from '../helpers.mjs';
 
 const NAMES = ['Sam', 'Jordan', 'Casey', 'Riley', 'Morgan', 'Avery', 'Quinn', 'Rowan', 'Emery', 'Hayden', 'Parker', 'Reese'];
 
@@ -82,4 +82,70 @@ test('one participant host carries a 5-person call, encrypted end to end', async
   console.log(`  audio delay speaker to listeners through the host: ${delays.join(', ')} ms`);
   console.log(`  host: carrying ${load.load} people (room for ${load.capacity}), sending ${load.sending_mbps} Mbit/s, receiving ${load.receiving_mbps} Mbit/s`);
   assert.ok(delays.every((d) => d != null && d < 1000), `every listener heard the tone: ${delays}`);
+});
+
+test('two hosts share a 6-person call; killing one mid-call moves its people to the other', async (t) => {
+  const s = await setup(t, { hosts: [{ name: 'Riley-desktop', upload: 40 }, { name: 'Morgan-laptop', upload: 40 }] });
+  const t0 = Date.now();
+  await addPeople(s, 5);
+  try { await Promise.all(s.pages.map((p) => waitFlowing(p, 5, 30000))); } catch (e) { await diag(s.pages); throw e; }
+  const joinMs = Date.now() - t0;
+  const plan = await s.sam.evaluate(() => window.meetCall.plan);
+  assert.equal(plan.mode, 'hosts');
+  assert.equal(plan.hosts.length, 2);
+  assert.equal(plan.links.length, 1, 'the two hosts are linked');
+  const loads = plan.hosts.map((h) => h.load);
+  assert.ok(loads.every((l) => l >= 2), `both hosts carry people: ${loads}`);
+  for (const a of Object.values(plan.assign)) assert.ok(a.standby && a.standby !== a.primary, 'everyone has a warm standby on the other host');
+  const before = await hostLoad(s);
+  console.log(`  e2ee before the kill: ${JSON.stringify(await Promise.all(s.pages.map(async (p) => (await p.evaluate(() => window.meetCall.snapshot())).stats.e2ee)))}`);
+
+  // Kill the host that carries Sam, with no warning (as if the laptop lost power).
+  const samPeer = await s.sam.evaluate(() => window.meetCall.peer);
+  const victimPeer = plan.assign[samPeer].primary;
+  const victimName = before.find((h) => h.peer === victimPeer).name;
+  const victim = s.procs.find((h) => h.name === victimName);
+  const moved = Object.entries(plan.assign).filter(([, a]) => a.primary === victimPeer).length;
+  const k0 = Date.now();
+  victim.kill('SIGKILL');
+  let recovered;
+  try { recovered = await Promise.all(s.pages.map(async (p) => { await waitFlowing(p, 5, 30000); return Date.now() - k0; })); } catch (e) { await diag(s.pages); throw e; }
+  const failovers = await Promise.all(s.pages.map((p) => p.evaluate(() => window.meetCall.lastFailover)));
+  const after = await hostLoad(s);
+  console.log(`  2 hosts, 6 people: all seeing and hearing all ${joinMs} ms after the first of 5 joined`);
+  console.log(`  host loads before: ${before.map((h) => `${h.name} ${h.load} people, sending ${h.sending_mbps} Mbit/s`).join('; ')}`);
+  console.log(`  killed ${victimName} (carrying ${moved}); every screen had all video and audio moving again after ${Math.max(...recovered)} ms (per screen: ${recovered.join(', ')})`);
+  console.log(`  switch inside the browsers (standby promoted): ${failovers.filter(Boolean).map((f) => `${f.ms} ms`).join(', ')}`);
+  console.log(`  after: ${after.map((h) => `${h.name} ${h.load} people`).join('; ')}`);
+  assert.ok(Math.max(...recovered) < 15000);
+});
+
+test('a host that is leaving hands its people to the other host first', async (t) => {
+  const s = await setup(t, { hosts: [{ name: 'Riley-desktop', upload: 40 }, { name: 'Morgan-laptop', upload: 40 }] });
+  await addPeople(s, 5);
+  await Promise.all(s.pages.map((p) => waitFlowing(p, 5, 60000)));
+  const plan = await s.sam.evaluate(() => window.meetCall.plan);
+  const leaving = s.procs[0];
+  const leavingPeer = (await hostLoad(s)).find((h) => h.name === leaving.name).peer;
+  const moved = Object.values(plan.assign).filter((a) => a.primary === leavingPeer).length;
+  // Watch for any moment a screen stops getting frames, while the host leaves politely (Ctrl+C).
+  for (const p of s.pages) await p.evaluate(() => {
+    window.__gap = 0; let last = performance.now(); let prev = null;
+    window.__gapT = setInterval(() => {
+      const f = window.meetCall.view().tiles.filter((x) => !/\(you\)/.test(x.name)).reduce((n, x) => n + x.frames, 0);
+      const now = performance.now();
+      if (prev != null && f > prev) { window.__gap = Math.max(window.__gap, now - last); last = now; }
+      prev = f;
+    }, 50);
+  });
+  const k0 = Date.now();
+  leaving.kill('SIGTERM');
+  await leaving.exited;
+  const leftMs = Date.now() - k0;
+  await Promise.all(s.pages.map((p) => waitFlowing(p, 5, 30000)));
+  const gaps = await Promise.all(s.pages.map((p) => p.evaluate(() => Math.round(window.__gap))));
+  console.log(`  polite leave: ${leaving.name} handed over ${moved} people and exited after ${leftMs} ms; longest gap in new frames on any screen: ${Math.max(...gaps)} ms (per screen: ${gaps.join(', ')})`);
+  const after = await hostLoad(s);
+  assert.equal(after.length, 1);
+  assert.equal(after[0].load, 6);
 });

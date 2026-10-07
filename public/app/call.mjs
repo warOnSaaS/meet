@@ -675,9 +675,10 @@ export class Call {
   view() {
     const tiles = [...this.root.querySelectorAll('.ui-tile')].map((el) => {
       const v = el.querySelector('video');
-      return { key: el.dataset.key, name: el.querySelector('.ui-tile-n').textContent, video: !!v.srcObject, w: v.videoWidth, h: v.videoHeight, t: v.currentTime, speaking: el.classList.contains('is-speaking'), muted: el.classList.contains('is-muted') };
+      return { key: el.dataset.key, name: el.querySelector('.ui-tile-n').textContent, video: !!v.srcObject, w: v.videoWidth, h: v.videoHeight, t: v.currentTime, frames: v.getVideoPlaybackQuality?.().totalVideoFrames ?? 0, speaking: el.classList.contains('is-speaking'), muted: el.classList.contains('is-muted') };
     });
-    const audio = [...this.audios.values()].map((a) => ({ peer: a.dataset.peer, playing: !a.paused, t: a.currentTime }));
+    // rtp: the RTP time of the last audio packet received, so a test can tell sound is arriving right now.
+    const audio = [...this.audios.values()].map((a) => ({ peer: a.dataset.peer, playing: !a.paused, t: a.currentTime, rtp: this.remote.get(`${a.dataset.peer}:mic`)?.receiver?.getSynchronizationSources?.()[0]?.rtpTimestamp ?? null }));
     return { tiles, audio };
   }
 
