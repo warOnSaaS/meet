@@ -1634,7 +1634,7 @@
     {
       "name": "meet.start_recording",
       "title": "Start recording",
-      "description": "Ask everyone in the call to agree to recording. Recording starts only after the notice is shown and spoken to everyone, and each person's answer is recorded (ROADMAP F11). Not built yet. Planned for v1.",
+      "description": "Ask everyone in the call to agree to recording. Every screen shows a notice that has to be answered; recording starts once everyone answered (or after 45 s), and anyone who said no or did not answer is left out of the picture and the sound. Host or co-host only. Each answer is stored (ROADMAP F11).",
       "input": {
         "additionalProperties": false,
         "type": "object",
@@ -1653,13 +1653,80 @@
       },
       "scope": "write",
       "confirm": "human",
+      "emits": [
+        "meet.recording.asked"
+      ],
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.answer_recording",
+      "title": "Answer the recording notice",
+      "description": "Your answer to the recording notice: agree to be recorded, or not. If you say no, you are left out of the picture and the sound. You can change your answer while it records.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "agree"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "agree": {
+            "type": "boolean",
+            "description": "true: you are in the recording. false: you are left out."
+          },
+          "shown_at": {
+            "type": "string",
+            "description": "When you saw the notice, ISO 8601 (defaults to now)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.recording.consent"
+      ],
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.recording_status",
+      "title": "Recording status",
+      "description": "Whether the call is being recorded: asking, recording or stopped; who agreed, who said no, who is being asked; which browser records; and where the file was saved.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "recording": {
+            "type": "string",
+            "description": "Recording id (defaults to the meeting's latest)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
       "emits": [],
-      "test": "test/unit/tools.test.mjs"
+      "test": "test/e2e/recording.test.mjs"
     },
     {
       "name": "meet.stop_recording",
       "title": "Stop recording",
-      "description": "Stop a recording. Not built yet. Planned for v1.",
+      "description": "Stop the recording. The browser that recorded it then saves the file to its disk or to the team's storage.",
       "input": {
         "additionalProperties": false,
         "type": "object",
@@ -1678,8 +1745,178 @@
       },
       "scope": "write",
       "confirm": "none",
+      "emits": [
+        "meet.recording.stopped"
+      ],
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.recording_upload_url",
+      "title": "Get an upload link for a recording",
+      "description": "A one-hour link to upload the recording straight to the team's S3-compatible storage (set in Settings). For the browser that recorded it.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "mime"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "recording": {
+            "type": "string",
+            "description": "Recording id (defaults to the meeting's latest)"
+          },
+          "mime": {
+            "type": "string",
+            "description": "video/webm or video/mp4"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
       "emits": [],
-      "test": "test/unit/tools.test.mjs"
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.save_recording",
+      "title": "Save a recording",
+      "description": "Record where the finished recording went (your disk, or the team's storage), its size and length, so the meeting lists it.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "where"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "recording": {
+            "type": "string",
+            "description": "Recording id (defaults to the meeting's latest)"
+          },
+          "where": {
+            "type": "string",
+            "enum": [
+              "disk",
+              "storage"
+            ]
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "duration_s": {
+            "type": "integer"
+          },
+          "mime": {
+            "type": "string",
+            "description": "video/webm or video/mp4"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.recording.saved"
+      ],
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.list_recordings",
+      "title": "List recordings",
+      "description": "The meeting's recordings: when, who asked, where each was saved, size and length. Recordings saved to someone's disk are listed but only they have the file.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.get_recording",
+      "title": "Get a recording",
+      "description": "One recording, with a one-hour download link when it is in the team's storage, and who agreed to be in it.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "recording": {
+            "type": "string",
+            "description": "Recording id (defaults to the meeting's latest)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/e2e/recording.test.mjs"
+    },
+    {
+      "name": "meet.delete_recording",
+      "title": "Delete a recording",
+      "description": "Delete a recording: the file in the team's storage and the record of it. Host only. A copy saved to someone's disk is theirs to delete. Consent answers are kept as proof.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "recording": {
+            "type": "string",
+            "description": "Recording id (defaults to the meeting's latest)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "delete",
+      "confirm": "none",
+      "emits": [
+        "meet.recording.deleted"
+      ],
+      "test": "test/e2e/recording.test.mjs"
     },
     {
       "name": "meet.join_as_agent",

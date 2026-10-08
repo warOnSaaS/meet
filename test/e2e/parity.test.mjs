@@ -141,6 +141,21 @@ test('every action on every screen has a tool, at desk and phone width', async (
     await g.page.waitForSelector('#notesdlg[open]');
     await check(g.page, 'notes notice, guest');
     await g.page.click('#notesdlg [data-act=notes-in]');
+    // Recording: the notice on both screens, then the recorder's save choices.
+    await host.click('#bar [data-act=more]');
+    await host.click('#more [data-act=rec-start]');
+    await host.waitForSelector('#recdlg[open]');
+    await check(host, 'recording notice');
+    await host.click('#recdlg [data-act=rec-yes]');
+    await g.page.waitForSelector('#recdlg[open]');
+    await check(g.page, 'recording notice, guest');
+    await g.page.click('#recdlg [data-act=rec-no]');
+    await host.waitForFunction(() => window.meetCall.recording.snapshot().recording, null, { timeout: 10000 });
+    await host.click('#bar [data-act=more]');
+    await check(host, 'more menu, recording');
+    await host.click('#more [data-act=rec-stop]');
+    await host.waitForSelector('#notices [data-act=rec-download]');
+    await check(host, 'recording ready');
     await check(g.page, 'call, guest');
 
     // Leaving, and a "help carry this call" link opened in a browser.

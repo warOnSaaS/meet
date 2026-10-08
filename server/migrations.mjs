@@ -103,4 +103,17 @@ ALTER TABLE meeting_notes ADD COLUMN sent TEXT;
 CREATE TABLE IF NOT EXISTS meet_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `,
   },
+  {
+    id: 5,
+    name: 'recording: who records, where it went',
+    sql: `
+ALTER TABLE meet_recordings ADD COLUMN started_by_name TEXT;
+ALTER TABLE meet_recordings ADD COLUMN recorder_pid TEXT;
+ALTER TABLE meet_recordings ADD COLUMN recording_at BIGINT;
+ALTER TABLE meet_recordings ADD COLUMN storage TEXT;
+ALTER TABLE meet_recordings ADD COLUMN size_bytes BIGINT;
+ALTER TABLE meet_recordings ADD COLUMN mime TEXT;
+CREATE INDEX IF NOT EXISTS meet_recordings_meeting ON meet_recordings (meeting_id, started_at);
+`,
+  },
 ];

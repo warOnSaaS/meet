@@ -19,7 +19,7 @@ import { FIELDS } from './server/settings.mjs';
 const SETTINGS_ENV = Object.values(FIELDS).map((f) => f.env);
 
 // Columns that are BIGINT on Postgres. The suite's driver returns them as strings; meet's code wants numbers.
-const NUMERIC = new Set(['id', 'n', 'm', 'version', 'created_at', 'starts_at', 'ends_at', 'started_at', 'ended_at', 'asked_at', 'joined_at', 'left_at', 'last_seen', 'updated_at', 'done_at', 'applied_at', 'answered_at', 'notice_shown_at', 'duration_min', 'duration_s', 'start_at', 'end_at', 'notes_on', 'notes_started_at', 'written_at', 'scripted', 'size_bytes', 'stopped_at', 'is_open']);
+const NUMERIC = new Set(['id', 'n', 'm', 'version', 'created_at', 'starts_at', 'ends_at', 'started_at', 'ended_at', 'asked_at', 'joined_at', 'left_at', 'last_seen', 'updated_at', 'done_at', 'applied_at', 'answered_at', 'notice_shown_at', 'duration_min', 'duration_s', 'start_at', 'end_at', 'notes_on', 'notes_started_at', 'written_at', 'scripted', 'size_bytes', 'stopped_at', 'is_open', 'recording_at']);
 const numbers = (row) => {
   if (!row) return row;
   for (const k of Object.keys(row)) if (NUMERIC.has(k) && typeof row[k] === 'string' && /^-?\d{1,16}$/.test(row[k])) row[k] = Number(row[k]);
@@ -104,6 +104,8 @@ export default async function register(ctx) {
         m.transcript = await db.all('SELECT * FROM meet_segments WHERE meeting_id = ? ORDER BY start_at', [m.id]);
         m.notes = await db.get('SELECT * FROM meeting_notes WHERE meeting_id = ?', [m.id]);
         m.notes_consents = await db.all('SELECT * FROM meet_notes_consents WHERE meeting_id = ?', [m.id]);
+        m.recordings = await db.all('SELECT * FROM meet_recordings WHERE meeting_id = ?', [m.id]);
+        m.recording_consents = await db.all('SELECT c.* FROM meet_recording_consents c JOIN meet_recordings r ON r.id = c.recording_id WHERE r.meeting_id = ?', [m.id]);
       }
       return { meetings };
     },

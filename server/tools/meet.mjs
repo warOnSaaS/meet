@@ -5,6 +5,7 @@ import { iceServers } from '../config.mjs';
 import { describePlan } from '../room/plan.mjs';
 import { runDoctor } from '../doctor.mjs';
 import { notesTools, NOTES_TITLES } from './notes.mjs';
+import { recordingTools, RECORDING_TITLES } from './recording.mjs';
 
 export class ToolError extends Error {
   constructor(code, message, status = 400) { super(message); this.code = code; this.status = status; }
@@ -122,6 +123,7 @@ async function targetParticipant(ctx, m, pid) {
 // The helpers the other tool files (notes, recording, whiteboard) build on.
 const H = { fail, str, bool, MEETING, PARTICIPANT, meetingRow, me, isOwner, requireHost, requireIn, requireMember, joinUrl, now, id, sign, verify };
 const notes = notesTools(H);
+const recording = recordingTools(H);
 
 // ---------- the tools ----------
 
@@ -592,6 +594,8 @@ export const tools = [
           transcript: await ctx.db.all('SELECT * FROM meet_segments WHERE meeting_id = ? ORDER BY start_at', [m.id]),
           notes: await ctx.db.get('SELECT * FROM meeting_notes WHERE meeting_id = ?', [m.id]),
           notes_consents: await ctx.db.all('SELECT * FROM meet_notes_consents WHERE meeting_id = ?', [m.id]),
+          recordings: await ctx.db.all('SELECT * FROM meet_recordings WHERE meeting_id = ?', [m.id]),
+          recording_consents: await ctx.db.all('SELECT c.* FROM meet_recording_consents c JOIN meet_recordings r ON r.id = c.recording_id WHERE r.meeting_id = ?', [m.id]),
         });
       }
       return { exported_at: new Date().toISOString(), meetings: out };
@@ -608,11 +612,10 @@ export const tools = [
   },
 
   ...notes.tools,
+  ...recording.tools,
 
   // ---- planned (v1). Listed so agents know they are coming; calling one returns not_built. ----
   ...[
-    ['meet.start_recording', 'human', 'Ask everyone in the call to agree to recording. Recording starts only after the notice is shown and spoken to everyone, and each person\'s answer is recorded (ROADMAP F11). Not built yet.'],
-    ['meet.stop_recording', 'none', 'Stop a recording. Not built yet.'],
     ['meet.join_as_agent', 'none', 'Have an AI agent join the call as a participant that listens and speaks. Not built yet.'],
   ].map(([name, confirm, description]) => ({
     name, scope: name.includes('get_') ? 'read' : 'write', confirm, planned: 'v1', events: [], description,
@@ -635,7 +638,7 @@ const TITLES = {
   'meet.doctor': 'Check calls can connect', 'meet.start_recording': 'Start recording', 'meet.stop_recording': 'Stop recording',
   'meet.get_transcript': 'Get the transcript', 'meet.summarise': 'Write meeting notes', 'meet.join_as_agent': 'Join as an agent',
 };
-Object.assign(TITLES, NOTES_TITLES);
+Object.assign(TITLES, NOTES_TITLES, RECORDING_TITLES);
 for (const t of tools) t.title = TITLES[t.name] ?? t.name;
 
 export const byName = new Map(tools.map((t) => [t.name, t]));

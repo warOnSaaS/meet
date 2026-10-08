@@ -8,6 +8,7 @@ import { callTool, mediaJoin, getTicket, getMediaBase } from './api.mjs';
 import { Signal } from './signal.mjs';
 import { esc, icon, toast, initials, copyText } from './dom.mjs';
 import { Notes } from './notes.mjs';
+import { Recording } from './record.mjs';
 
 const SPEAK_LEVEL = 0.03;
 // Webinar viewers hear and see speakers this much later (a receive buffer, 1 to 3 s as decided): smoother
@@ -57,6 +58,8 @@ export class Call {
     // AI notes and the call's encrypted channel (captions, whiteboard).
     this.notes = new Notes(this);
     await this.notes.init().catch((e) => console.warn('[meet] notes', e.message));
+    this.recording = new Recording(this);
+    await this.recording.load();
     this.levelT = setInterval(() => this.pollLevels(), 250);
     this.statT = setInterval(() => this.refreshTrouble(), 3000);
     window.addEventListener('pagehide', this.onHide = () => { navigator.sendBeacon?.(`${getMediaBase()}/leave?token=` + encodeURIComponent(j.token)); });
@@ -66,6 +69,7 @@ export class Call {
   async stopMedia() {
     clearInterval(this.levelT); clearInterval(this.statT);
     this.notes?.stop();
+    this.recording?.stop();
     if (this.onHide) window.removeEventListener('pagehide', this.onHide);
     this.ro?.disconnect();
     await this.engine?.stop().catch(() => {});
@@ -77,6 +81,7 @@ export class Call {
   }
 
   async leave() {
+    if ((this.recording?.rec || this.recording?.done) && !confirm('Your recording is not saved yet. Leave anyway and lose it?')) return;
     this.leaving = true;
     await callTool('meet.leave', { meeting: this.meeting.id }).catch(() => {});
     await this.exit('You left the meeting.');
@@ -263,6 +268,7 @@ export class Call {
       if (b.what === 'chat') this.loadChat();
       if (b.what === 'meeting') this.loadStatus();
       if (b.what === 'notes' || (b.what === 'participants' && this.notes?.status?.on)) this.notes?.load();
+      if (b.what === 'recording' || (b.what === 'participants' && this.recording?.status?.state === 'recording')) this.recording?.load();
     }, 60);
   }
 
@@ -390,6 +396,7 @@ export class Call {
       <nav class="ui-callbar meet-bar" id="bar" aria-label="Call controls"></nav>
       <div id="audios" hidden></div>
       <dialog class="ui-dialog meet-dlg" id="notesdlg" aria-label="Notes notice"></dialog>
+      <dialog class="ui-dialog meet-dlg" id="recdlg" aria-label="Recording notice"></dialog>
       <div class="meet-more" id="more" hidden></div>
     </div>`;
     this.root.removeAttribute('aria-busy');
@@ -397,8 +404,10 @@ export class Call {
     this.root.querySelector('#side').addEventListener('click', (e) => this.onSide(e));
     this.root.querySelector('#side').addEventListener('submit', (e) => this.onSideSubmit(e));
     this.root.querySelector('#notices').addEventListener('click', (e) => this.onNotice(e));
-    this.root.querySelector('#notesdlg').addEventListener('click', (e) => this.onSide(e));
-    this.root.querySelector('#notesdlg').addEventListener('cancel', (e) => e.preventDefault()); // answer it; Escape does not count as an answer
+    for (const id of ['#notesdlg', '#recdlg']) {
+      this.root.querySelector(id).addEventListener('click', (e) => this.onSide(e));
+      this.root.querySelector(id).addEventListener('cancel', (e) => e.preventDefault()); // answer it; Escape does not count as an answer
+    }
     this.root.querySelector('#more').addEventListener('click', (e) => this.onMore(e));
   }
 
@@ -547,6 +556,7 @@ export class Call {
       out.push(`<div class="ui-notice"><span>${esc(r.body?.by ?? 'The host')} asked you to share your screen. You pick what to share.</span><button class="ui-btn is-accent is-sm" data-tool="meet.set_sharing" data-act="share">Share screen</button><button class="ui-btn is-ghost is-sm" data-tool="none" data-why="hides the request on this screen" data-act="dismiss" data-id="${esc(r.id)}">Not now</button></div>`);
     }
     if (this.amHost() && this.waiting && this.panel !== 'people') out.push(`<div class="ui-notice is-quiet"><span>${this.waiting} waiting to join.</span><button class="ui-btn is-sm" data-tool="meet.admit" data-act="admit-all">Let everyone in</button><button class="ui-btn is-ghost is-sm" data-tool="none" data-why="opens the people panel" data-act="see-waiting">See who</button></div>`);
+    out.push(this.recording?.notice() ?? '');
     const html = out.join('');
     const el = this.root.querySelector('#notices');
     if (el.innerHTML !== html) el.innerHTML = html;
@@ -644,7 +654,7 @@ export class Call {
         <dt>People</dt><dd>${s?.people_in_call ?? ''} in the call${s?.limit ? `, room for about ${s.limit}` : ''}</dd>
         <dt>Waiting room</dt><dd>${m.waiting_room ? 'On' : 'Off'}</dd>
         <dt>Locked</dt><dd>${m.locked ? 'Yes, nobody new can join' : 'No'}</dd>
-        <dt>Recording</dt><dd>Off. Recording is never on unless everyone is told and agrees.</dd>
+        <dt>Recording</dt><dd>${esc(this.recording?.infoRow() ?? 'Off.')}</dd>
       </dl>
       ${hosts ? `<h3 class="meet-side-sub">Computers carrying the call</h3><ul class="meet-hosts">${hosts}</ul>` : ''}
       <div class="meet-side-a is-col">
@@ -691,6 +701,7 @@ export class Call {
     if (!b) return;
     const a = b.dataset.act, pid = b.dataset.pid, mid = this.meeting.id;
     try {
+      if (a.startsWith('rec-')) { b.disabled = true; try { return await this.recording?.onAct(a); } finally { b.disabled = false; } }
       if (/^(notes-|send-|captions$)/.test(a)) { b.disabled = true; try { return await this.notes?.onAct(a, b); } finally { b.disabled = false; } }
       if (a === 'close') return this.openPanel(null);
       if (a === 'admit') await callTool('meet.admit', { meeting: mid, participant: pid });
@@ -741,11 +752,12 @@ export class Call {
     if (b.dataset.act === 'dismiss') { this.requests = this.requests.filter((r) => r.id !== b.dataset.id); this.render(); }
     if (b.dataset.act === 'admit-all') await callTool('meet.admit', { meeting: this.meeting.id, all: true }).catch((err) => toast(err.message));
     if (b.dataset.act === 'see-waiting') this.openPanel('people');
+    if (b.dataset.act?.startsWith('rec-')) { b.disabled = true; try { await this.recording?.onAct(b.dataset.act); } catch (err) { toast(err.message); } finally { b.disabled = false; } }
   }
 
   // What everyone must be able to see while it is happening: notes on, recording.
   markers() {
-    return [this.notes?.marker() ?? '', this.recMarker?.() ?? ''].join('');
+    return [this.recording?.marker() ?? '', this.notes?.marker() ?? ''].join('');
   }
 
   renderCaptions() {
@@ -763,7 +775,7 @@ export class Call {
     return [
       item('hand', 'meet.raise_hand', hand ? 'Lower hand' : 'Raise hand', 'hand'),
       item('layout', 'meet.set_layout', this.layout === 'grid' ? 'Speaker view' : 'Grid view', this.layout === 'grid' ? 'speaker' : 'grid'),
-      ...(this.extraMore?.() ?? []).map((x) => item(...x)),
+      ...(this.recording?.moreItems() ?? []).map((x) => item(...x)),
       item('captions', 'none', this.notes?.captions ? 'Hide captions' : 'Show captions', 'captions', 'shows or hides captions on this screen only'),
       item('info', 'none', 'Call details', 'info', 'opens call details'),
     ].join('');
@@ -785,7 +797,7 @@ export class Call {
       if (a === 'hand' || a === 'layout') return this.onBar({ target: b });
       if (a === 'captions') return this.notes?.onAct('captions');
       if (a === 'info') return this.openPanel('info');
-      await this.onExtra?.(a, b);
+      if (a.startsWith('rec-')) await this.recording?.onAct(a);
     } catch (err) { toast(err.message); }
   }
 

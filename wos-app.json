@@ -44,7 +44,12 @@
       "meet.share.started",
       "meet.share.stopped",
       "meet.transcript.added",
-      "meet.transcript.deleted"
+      "meet.transcript.deleted",
+      "meet.recording.asked",
+      "meet.recording.consent",
+      "meet.recording.stopped",
+      "meet.recording.saved",
+      "meet.recording.deleted"
     ],
     "listens": []
   },
@@ -97,7 +102,9 @@
       "meeting_chat",
       "meet_segments",
       "meeting_notes",
-      "meet_notes_consents"
+      "meet_notes_consents",
+      "meet_recordings",
+      "meet_recording_consents"
     ]
   }
 }

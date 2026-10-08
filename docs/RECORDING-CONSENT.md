@@ -17,6 +17,14 @@ Founder decision F11 and ROADMAP 9.1 (R-L1). Several US states (for example Cali
 
 **Spoken notice.** The roadmap asks for a spoken notice as well. It is not played: the founder asked that nothing in Meetings ever plays a voice by itself. The on-screen notice blocks the call until it is answered instead. If a spoken notice is needed later (for a jurisdiction that requires it), it should be a recorded announcement the host chooses to play, not automatic speech.
 
-## Recording
+## Recording (built)
 
-See the section below once recording ships. Until then `meet.start_recording` answers "not built yet".
+| Rule | How |
+|---|---|
+| Off by default | Only a host or co-host can ask for it (`meet.start_recording`, `confirm: human` when an agent asks). |
+| Everyone is asked first | Every screen in the call shows a notice that has to be answered: who wants to record, and "Record me" or "Leave me out". Nothing is recorded while people are being asked. Recording starts once everyone in the call has answered, or after 45 s. |
+| A no is respected | Anyone who says no, or has not answered, is left out of the picture and the sound: the recording browser does not draw their video and does not mix their microphone. People who join while it records are asked too, and are left out until they say yes. Anyone can change their answer while it records (`meet.answer_recording`). |
+| Visible while on | "Asking to record" and then a red "Recording" marker at the top of every screen in the call. |
+| Consent record | `meet_recording_consents`: who, the answer, when the notice was shown, when they answered. Exported with everything else; kept when a recording is deleted. |
+| Where it goes | The recording is made in one browser (the person who asked) and saved to that person's disk, or straight to the team's S3-compatible storage with a one-hour presigned link (it never passes through the app's server). |
+| Delete | The host deletes a stored recording at any time (`meet.delete_recording`), which removes the file from the bucket. A copy downloaded to someone's disk is theirs. |

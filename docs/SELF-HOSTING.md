@@ -21,6 +21,18 @@ docker compose exec meet node bin/meet.mjs doctor https://$DOMAIN
 
 The doctor checks that UDP leaves the server, that your certificate is valid, that TURN and LiveKit answer, and says what to fix in plain words. Signed-in people can run the same check from the home screen ("Check calls").
 
+## Notes and recordings (optional)
+
+Set these in the app (home page, "Notes and recording settings"; inside wOS, per team) or in `.env` as defaults for everyone. Keys saved in the app are encrypted with a key made from `SESSION_SECRET`.
+
+| Setting | Env | What for |
+|---|---|---|
+| Notes model | `NOTES_MODEL_URL`, `NOTES_MODEL`, `NOTES_MODEL_KEY` | Any OpenAI-compatible chat API (OpenAI, a local Ollama at `http://localhost:11434/v1`, LM Studio, vLLM). Without it, a labelled script writes demo notes. |
+| Speech service | `TRANSCRIBE_URL`, `TRANSCRIBE_MODEL`, `TRANSCRIBE_KEY` | Only for people whose device cannot run Whisper and who have no helper in the call. Any OpenAI-compatible `/audio/transcriptions` (OpenAI, or whisper.cpp's server on your own machine). |
+| Recording storage | `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | S3, Cloudflare R2, MinIO or Backblaze B2. Browsers upload straight to the bucket, so the bucket needs a CORS rule allowing `PUT` and `GET` from your Meetings address with the `content-type` header. Without storage, recordings are saved to the recorder's disk. |
+
+Whisper itself runs in each person's browser: nothing to install on the server. The model files come from the Hugging Face hub and the WebAssembly runtime from jsDelivr, once per browser.
+
 ## Your own Postgres
 
 Set `DATABASE_URL` to any Postgres (Neon, Supabase, RDS, your own). Tables are created and updated when the app starts. Without it, the app uses SQLite in `./data/meet.db`.
