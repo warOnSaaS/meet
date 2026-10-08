@@ -813,7 +813,19 @@ var init_notes = __esm({
         this.channel.send("cap", line).catch(() => {
         });
         if (!savedByServer) {
-          await callTool("meet.add_transcript", { meeting: this.mid, segments: [{ id: seg.id, participant: who.pid, start_at: String(seg.start_at), end_at: String(seg.end_at), text: seg.text, engine: seg.engine }] }).catch((e) => console.warn("[meet] transcript", e.message));
+          const line2 = { id: seg.id, participant: who.pid, start_at: String(seg.start_at), end_at: String(seg.end_at), text: seg.text, engine: seg.engine };
+          for (let i = 0; i < 5; i++) {
+            try {
+              await callTool("meet.add_transcript", { meeting: this.mid, segments: [line2] });
+              break;
+            } catch (e) {
+              if (e.code !== "offline" && e.code !== "server") {
+                console.warn("[meet] transcript", e.message);
+                break;
+              }
+              await new Promise((r) => setTimeout(r, 1e3 * 2 ** i));
+            }
+          }
         }
       }
       received(seg, from) {
