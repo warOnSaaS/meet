@@ -71,7 +71,7 @@ body.meet:has(.meet-call){overflow:hidden}
 .meet-notices .ui-notice{align-items:center;flex-wrap:wrap}
 .meet-notices .ui-notice>span{flex:1;min-width:200px}
 .meet-body{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;padding:8px 16px 0;gap:12px}
-.meet-call[data-panel=people] .meet-body,.meet-call[data-panel=chat] .meet-body,.meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr) 340px}
+.meet-call[data-panel=people] .meet-body,.meet-call[data-panel=chat] .meet-body,.meet-call[data-panel=info] .meet-body,.meet-call[data-panel=notes] .meet-body{grid-template-columns:minmax(0,1fr) 360px}
 .meet-stage{position:relative;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden;border-radius:var(--ui-radius-lg)}
 .meet-stage .ui-calls{min-height:0;overflow:auto;align-content:center;justify-content:center}
 .meet-main:empty{display:none}
@@ -127,7 +127,9 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
 /* ---------- notes, captions, the More menu ---------- */
 .meet-call-tr{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .meet-notes-on .ui-dot,.meet-rec-on .ui-dot{animation:meet-blink 1.6s ease-in-out infinite}
-@keyframes meet-blink{50%{opacity:.35}}
+@keyframes meet-blink{50%{opacity:.55}}
+.ui-dot.meet-live,.meet-dot.is-rec{background:var(--ui-st-failed)}
+.ui-chip.is-rec{font-weight:600}
 @media (prefers-reduced-motion:reduce){.meet-notes-on .ui-dot,.meet-rec-on .ui-dot{animation:none}}
 .meet-dot.is-rec{min-width:9px;width:9px;height:9px;padding:0;top:2px;right:2px;background:var(--ui-bad)}
 .meet-cap{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none;z-index:4;padding:0 12px}
@@ -178,7 +180,7 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
   .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}
   .meet-ways{grid-template-columns:1fr}
   .meet-body{padding:6px 8px 0}
-  .meet-call[data-panel=people] .meet-body,.meet-call[data-panel=chat] .meet-body,.meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}
+  .meet-call[data-panel=people] .meet-body,.meet-call[data-panel=chat] .meet-body,.meet-call[data-panel=info] .meet-body,.meet-call[data-panel=notes] .meet-body{grid-template-columns:minmax(0,1fr)}
   .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}
   .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}
   .meet-bar button{width:38px;height:38px;flex:none}

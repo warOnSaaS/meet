@@ -266,7 +266,7 @@ async function joinPage(token) {
       <p class="ui-label">${m.kind === 'webinar' ? 'Webinar' : 'Meeting'}</p>
       <h1 class="meet-h">${esc(m.title)}</h1>
       <p class="ui-mute">${m.status === 'live' ? 'Happening now.' : m.starts_at ? `Starts ${esc(fmtWhen(m.starts_at))}.` : ''} ${m.waiting_room && !hostKey && !m.you_host ? 'The host lets people in.' : ''}</p>
-      ${m.notes_on ? '<div class="ui-notice is-quiet meet-join-notice"><span><span class="ui-dot is-bad"></span> Notes are on in this meeting. Before anything you say is written down, you are asked, and you can say no.</span></div>' : ''}
+      ${m.notes_on ? '<div class="ui-notice is-quiet meet-join-notice"><span><span class="ui-dot meet-live"></span> Notes are on in this meeting. Before anything you say is written down, you are asked, and you can say no.</span></div>' : ''}
       <label class="ui-field"><span class="ui-label">Your name</span><input class="ui-input" name="name" value="${esc(name)}" required maxlength="60" autocomplete="name" placeholder="Your name"></label>
       <button class="ui-btn is-accent is-lg is-block" type="submit" data-tool="meet.join">${hostKey || m.you_host ? 'Start the meeting' : 'Join'}</button>
       ${!state.who.user && state.who.signin_available ? `<p class="ui-hint">Have an account? <a href="${signinUrl()}?next=${encodeURIComponent(location.pathname + location.search)}">${accountSignin() ? 'Sign in' : 'Sign in with GitHub'}</a>. Guests need no account.</p>` : ''}

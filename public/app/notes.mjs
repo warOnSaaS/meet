@@ -122,7 +122,7 @@ export class Notes {
     if (!d) return;
     d.innerHTML = `<h3>Notes are on</h3>
       <p>${esc(this.status.started_by ?? 'The host')} turned on AI notes. If you agree, your device writes down what you say, and your words are kept with this meeting so the team gets a summary and action items.</p>
-      <p class="ui-mute">Your device does it with ${esc(ENGINE_LABEL[this.engine] ?? this.engine).replace(/^./, (c) => c.toLowerCase())}. You can change your answer any time, or leave the call.</p>
+      <p class="ui-mute">How: ${esc(ENGINE_LABEL[this.engine] ?? this.engine)}. You can change your answer any time, or leave the call.</p>
       <div class="ui-dialog-a"><button class="ui-btn is-ghost" data-tool="meet.answer_notes" data-act="notes-out">Leave my voice out</button><button class="ui-btn is-accent" data-tool="meet.answer_notes" data-act="notes-in">Include my voice</button></div>`;
     if (!d.open) try { d.showModal(); } catch { d.setAttribute('open', ''); }
   }
@@ -139,7 +139,7 @@ export class Notes {
 
   marker() {
     if (!this.status?.on) return '';
-    return `<span class="ui-chip is-soft meet-notes-on" title="Notes are on: words of people who agreed are written down"><span class="ui-dot is-bad"></span> Notes on</span>`;
+    return `<span class="ui-chip is-soft meet-notes-on" title="Notes are on: words of people who agreed are written down"><span class="ui-dot meet-live"></span> Notes on</span>`;
   }
 
   captionsHtml() {
@@ -159,7 +159,7 @@ export class Notes {
     const stateWord = { loading: `Loading the speech model${this.progress?.total ? ` (${Math.round((this.progress.loaded / this.progress.total) * 100)}%)` : ''}…`, listening: 'Listening', muted: 'Paused while you are muted', excluded: 'Your voice is left out', asking: 'Waiting for your answer', waiting: 'Starting…', error: 'Stopped on this device', off: '' }[this.state] ?? '';
     const writtenBy = mine?.written_by === 'self' ? ENGINE_LABEL[this.engine] : mine?.written_by === 'server' ? ENGINE_LABEL.server : mine?.written_by?.startsWith('helper:') ? `${ENGINE_LABEL.helper}: ${esc(s.people.find((p) => `helper:${p.participant}` === mine.written_by)?.name ?? 'someone')}` : mine?.answer === 'include' ? 'Nobody can yet: this device cannot, and there is no helper or speech service' : '';
     const head = s.on
-      ? `<div class="meet-notes-h"><span class="ui-dot is-bad"></span><span><b>Notes are on</b><br><span class="ui-mute">Turned on by ${esc(s.started_by ?? 'the host')}. Only people who agreed are written down.</span></span></div>`
+      ? `<div class="meet-notes-h"><span class="ui-dot meet-live"></span><span><b>Notes are on</b><br><span class="ui-mute">Turned on by ${esc(s.started_by ?? 'the host')}. Only people who agreed are written down.</span></span></div>`
       : `<div class="meet-notes-h"><span class="ui-dot"></span><span><b>Notes are off</b><br><span class="ui-mute">${host ? 'Turn them on and everyone is asked first. Each person\'s own device writes down their words.' : 'The host can turn on AI notes. You will be asked first.'}</span></span></div>`;
     const hostA = host ? `<p class="meet-side-a">${s.on ? '<button class="ui-btn is-quiet is-sm" data-tool="meet.stop_notes" data-act="notes-stop">Turn notes off</button>' : '<button class="ui-btn is-accent is-sm" data-tool="meet.start_notes" data-act="notes-start">Turn notes on</button>'}</p>` : '';
     const me = s.on && mine ? `<h3 class="meet-side-sub">Your voice</h3>

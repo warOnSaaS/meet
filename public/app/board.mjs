@@ -72,7 +72,7 @@ export class Whiteboard {
     const dark = matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.dataset.theme !== 'light';
     this.root.render(L.React.createElement(L.Excalidraw, {
       excalidrawAPI: (api) => { this.api = api; this.toScene(); },
-      initialData: { elements: this.elements(), appState: { viewBackgroundColor: dark ? '#121214' : '#ffffff' } },
+      initialData: { elements: this.elements(), appState: { viewBackgroundColor: '#ffffff' } }, // dark theme inverts the background
       theme: dark ? 'dark' : 'light',
       onChange: (els) => this.fromScene(els),
       UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false } },

@@ -77,7 +77,7 @@ export class Recording {
     const s = this.status;
     if (!s || !['asking', 'recording'].includes(s.state)) return '';
     return s.state === 'recording'
-      ? '<span class="ui-chip is-bad meet-rec-on" title="This call is being recorded"><span class="ui-dot is-bad"></span> Recording</span>'
+      ? '<span class="ui-chip meet-rec-on is-rec" title="This call is being recorded"><span class="ui-dot meet-live"></span> Recording</span>'
       : '<span class="ui-chip is-soft meet-rec-on" title="Everyone is being asked about recording"><span class="ui-dot is-warn"></span> Asking to record</span>';
   }
 
