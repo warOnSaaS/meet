@@ -125,7 +125,7 @@ async function homePage() {
       </details>
     </section>` : ''}
     <section class="meet-section meet-ways">
-      ${nav.suite ? '' : '<div class="ui-card"><h3 class="meet-h3">Use it here</h3><p class="ui-mute">Sign in with GitHub and start meetings on this server. Calls of up to 4 people need nothing else.</p></div>'}
+      ${nav.suite ? '' : `<div class="ui-card"><h3 class="meet-h3">Use it here</h3><p class="ui-mute">${accountSignin() ? 'Sign in with your free warOnSaaS account (GitHub, Google or an email link) to start meetings. Guests never need one.' : 'Sign in with GitHub and start meetings on this server.'} Calls of up to 4 people need nothing else.</p></div>`}
       <div class="ui-card"><h3 class="meet-h3">Host it yourself, free</h3><p class="ui-mute">One command on your own server: <code>docker compose up</code>. Add a media server for big calls with <code>--profile meetings</code>. AGPL-3.0.</p><p><a class="ui-btn is-quiet is-sm" href="${REPO}" rel="noopener">${icon('github')} Get the code</a></p></div>
     </section>
   </main>`;
