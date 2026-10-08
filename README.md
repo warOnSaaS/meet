@@ -36,6 +36,7 @@ Or without Docker: `npm install && npm start` (Node 22 or newer). It uses SQLite
 | Export | `meet.export` gives you every meeting you host, who joined and the chat, as JSON. |
 | Check | `meet doctor` (and the `meet.doctor` tool) checks UDP, TLS, TURN and the media server, and says what to fix. |
 | AI notes | Off until a host turns them on. Everyone is asked first; each person's own device writes down only their own voice (Whisper, in the browser), captions reach the others encrypted, and when the call ends a summary, decisions and action items are written and sent to the CRM, the board, Chat and email (inside wOS). See [AI notes](#ai-notes). |
+| Whiteboard | Excalidraw for everyone in the call, merged with Yjs; every stroke goes between browsers encrypted with the meeting key. Saved to the meeting, exported as PNG or SVG, attached to a CRM record or a board task (inside wOS). A shape reaches the other screen in about a quarter of a second on long-polling. |
 | Recording | Off until a host asks. Everyone is asked first, and anyone who says no is left out of the picture and the sound. One browser records the composed call (everyone's video and mixed sound) and saves it to its disk or straight to the team's S3-compatible storage. See [docs/RECORDING-CONSENT.md](docs/RECORDING-CONSENT.md). |
 
 ## How a call is carried
@@ -160,4 +161,4 @@ What these numbers do not show: real networks (loss, jitter, NAT, distance), hos
 
 ## Licence
 
-AGPL-3.0-only. The ui-design kit in `public/ui` is Apache-2.0. mediasoup is ISC, LiveKit's client is Apache-2.0.
+AGPL-3.0-only. The ui-design kit in `public/ui` is Apache-2.0. mediasoup is ISC, LiveKit's client is Apache-2.0, transformers.js is Apache-2.0 and the Whisper models are MIT, Excalidraw, React and Yjs are MIT, MediaPipe is Apache-2.0.

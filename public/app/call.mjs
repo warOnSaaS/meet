@@ -9,6 +9,7 @@ import { Signal } from './signal.mjs';
 import { esc, icon, toast, initials, copyText } from './dom.mjs';
 import { Notes } from './notes.mjs';
 import { Recording } from './record.mjs';
+import { Whiteboard } from './board.mjs';
 
 const SPEAK_LEVEL = 0.03;
 // Webinar viewers hear and see speakers this much later (a receive buffer, 1 to 3 s as decided): smoother
@@ -60,6 +61,8 @@ export class Call {
     await this.notes.init().catch((e) => console.warn('[meet] notes', e.message));
     this.recording = new Recording(this);
     await this.recording.load();
+    this.whiteboard = new Whiteboard(this);
+    await this.whiteboard.load();
     this.levelT = setInterval(() => this.pollLevels(), 250);
     this.statT = setInterval(() => this.refreshTrouble(), 3000);
     window.addEventListener('pagehide', this.onHide = () => { navigator.sendBeacon?.(`${getMediaBase()}/leave?token=` + encodeURIComponent(j.token)); });
@@ -70,6 +73,7 @@ export class Call {
     clearInterval(this.levelT); clearInterval(this.statT);
     this.notes?.stop();
     this.recording?.stop();
+    this.whiteboard?.stop();
     if (this.onHide) window.removeEventListener('pagehide', this.onHide);
     this.ro?.disconnect();
     await this.engine?.stop().catch(() => {});
@@ -268,6 +272,7 @@ export class Call {
       if (b.what === 'chat') this.loadChat();
       if (b.what === 'meeting') this.loadStatus();
       if (b.what === 'notes' || (b.what === 'participants' && this.notes?.status?.on)) this.notes?.load();
+      if (b.what === 'board') this.whiteboard?.load();
       if (b.what === 'recording' || (b.what === 'participants' && this.recording?.status?.state === 'recording')) this.recording?.load();
     }, 60);
   }
@@ -428,6 +433,7 @@ export class Call {
     if (tr.innerHTML !== topr) tr.innerHTML = topr;
     this.renderNotices();
     this.renderStage();
+    this.whiteboard?.renderHead();
     this.renderBar();
     this.renderSide();
   }
@@ -776,6 +782,7 @@ export class Call {
       item('hand', 'meet.raise_hand', hand ? 'Lower hand' : 'Raise hand', 'hand'),
       item('layout', 'meet.set_layout', this.layout === 'grid' ? 'Speaker view' : 'Grid view', this.layout === 'grid' ? 'speaker' : 'grid'),
       ...(this.recording?.moreItems() ?? []).map((x) => item(...x)),
+      ...(this.whiteboard?.moreItems() ?? []).map((x) => item(...x)),
       item('captions', 'none', this.notes?.captions ? 'Hide captions' : 'Show captions', 'captions', 'shows or hides captions on this screen only'),
       item('info', 'none', 'Call details', 'info', 'opens call details'),
     ].join('');
@@ -798,6 +805,7 @@ export class Call {
       if (a === 'captions') return this.notes?.onAct('captions');
       if (a === 'info') return this.openPanel('info');
       if (a.startsWith('rec-')) await this.recording?.onAct(a);
+      if (a.startsWith('wb-')) await this.whiteboard?.onAct(a);
     } catch (err) { toast(err.message); }
   }
 

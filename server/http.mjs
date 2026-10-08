@@ -163,7 +163,7 @@ export function createApp({ db, config }) {
 
   // Browser libraries built into public/vendor (scripts/build-client.mjs). Immutable per deploy name.
   function serveAsset(req, res, name) {
-    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) return json(res, 404, { ok: false });
+    if (!/^(wb\/)?[a-z0-9][a-z0-9._-]*$/i.test(name)) return json(res, 404, { ok: false });
     return serveStatic(req, res, `/vendor/${name}`);
   }
 
@@ -208,7 +208,7 @@ export async function body(req) {
   let n = 0;
   for await (const c of req) {
     n += c.length;
-    if (n > 1e6) throw new ToolError('too_big', 'Request too large.', 413);
+    if (n > 4e6) throw new ToolError('too_big', 'Request too large.', 413);
     chunks.push(c);
   }
   if (!chunks.length) return {};

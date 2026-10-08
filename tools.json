@@ -1919,6 +1919,204 @@
       "test": "test/e2e/recording.test.mjs"
     },
     {
+      "name": "meet.open_whiteboard",
+      "title": "Open the whiteboard",
+      "description": "Open the meeting's whiteboard for everyone in the call (it is made the first time). Everyone draws on the same board; strokes go between browsers encrypted with the meeting key.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "title": {
+            "type": "string",
+            "description": "A name for the board"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.board.opened"
+      ],
+      "test": "test/e2e/whiteboard.test.mjs"
+    },
+    {
+      "name": "meet.close_whiteboard",
+      "title": "Close the whiteboard",
+      "description": "Put the whiteboard away for everyone in the call. It stays saved with the meeting. The person who opened it or a host.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.board.closed"
+      ],
+      "test": "test/e2e/whiteboard.test.mjs"
+    },
+    {
+      "name": "meet.get_whiteboard",
+      "title": "Get the whiteboard",
+      "description": "The meeting's whiteboard: whether it is open, its text, how many shapes, where it was attached; with full: true, also the drawing (Excalidraw elements) and its merge state.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "full": {
+            "type": "boolean",
+            "description": "Also return the drawing and its state"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/e2e/whiteboard.test.mjs"
+    },
+    {
+      "name": "meet.save_whiteboard",
+      "title": "Save the whiteboard",
+      "description": "Save the whiteboard to the meeting: its merge state, the drawing as Excalidraw elements, and pictures (SVG, and PNG when small). Browsers in the call do this by themselves a few seconds after each change; an agent can draw by sending elements.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "state": {
+            "type": "string",
+            "description": "Yjs state, base64"
+          },
+          "elements": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Excalidraw elements"
+          },
+          "svg": {
+            "type": "string",
+            "description": "The drawing as SVG"
+          },
+          "png_base64": {
+            "type": "string",
+            "description": "The drawing as PNG, base64"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.board.saved"
+      ],
+      "test": "test/e2e/whiteboard.test.mjs"
+    },
+    {
+      "name": "meet.export_whiteboard",
+      "title": "Export the whiteboard",
+      "description": "The whiteboard as a picture: SVG (text) or PNG (base64), as last saved.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "format"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "svg",
+              "png"
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/e2e/whiteboard.test.mjs"
+    },
+    {
+      "name": "meet.attach_whiteboard",
+      "title": "Attach the whiteboard",
+      "description": "Attach the whiteboard to a CRM record (as a note with its text and a link) or a board task (as a comment). Inside wOS.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "to"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "to": {
+            "type": "string",
+            "description": "crm:deal:<id or name>, crm:contact:..., crm:org:..., or board:task:<id>"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.board.attached"
+      ],
+      "test": "test/e2e/whiteboard.test.mjs"
+    },
+    {
       "name": "meet.join_as_agent",
       "title": "Join as an agent",
       "description": "Have an AI agent join the call as a participant that listens and speaks. Not built yet. Planned for v1.",

@@ -1291,6 +1291,279 @@ var init_record = __esm({
   }
 });
 
+// public/app/board.mjs
+function lib() {
+  if (!libP) {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = assetUrl("wb/whiteboard.css");
+    document.head.append(css);
+    libP = import(
+      /* @vite-ignore */
+      assetUrl("wb/whiteboard.js")
+    );
+  }
+  return libP;
+}
+var b642, unb642, libP, Whiteboard;
+var init_board = __esm({
+  "public/app/board.mjs"() {
+    init_api();
+    init_dom();
+    b642 = (u8) => {
+      let s = "";
+      for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode(...u8.subarray(i, i + 32768));
+      return btoa(s);
+    };
+    unb642 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    libP = null;
+    Whiteboard = class {
+      constructor(call) {
+        this.call = call;
+        this.status = null;
+        this.hidden = false;
+        this.stats = { sent: 0, received: 0, saves: 0 };
+      }
+      get mid() {
+        return this.call.meeting.id;
+      }
+      async load() {
+        try {
+          this.status = await callTool("meet.get_whiteboard", { meeting: this.mid });
+        } catch {
+          return;
+        }
+        if (this.status.open && !this.hidden) await this.show();
+        if (!this.status.open) this.hide(true);
+        this.call.render();
+      }
+      async show() {
+        if (this.el) {
+          this.el.hidden = false;
+          return;
+        }
+        const stage = this.call.root.querySelector("#stage");
+        this.el = document.createElement("div");
+        this.el.className = "meet-wb";
+        this.el.innerHTML = `<div class="meet-wb-h"><b class="meet-wb-t"></b><div class="meet-wb-a" id="wba"></div></div><div class="meet-wb-c" id="wbc"><p class="ui-empty">Loading the whiteboard\u2026</p></div>`;
+        stage.append(this.el);
+        this.el.addEventListener("click", (e) => this.onClick(e));
+        this.el.addEventListener("submit", (e) => this.onSubmit(e));
+        this.renderHead();
+        const L = await lib();
+        this.L = L;
+        this.doc = new L.Y.Doc();
+        this.map = this.doc.getMap("elements");
+        const full = await callTool("meet.get_whiteboard", { meeting: this.mid, full: true }).catch(() => null);
+        if (full?.state) L.Y.applyUpdate(this.doc, unb642(full.state), "remote");
+        else if (full?.elements?.length) this.doc.transact(() => {
+          for (const e of full.elements) this.map.set(e.id, e);
+        }, "remote");
+        const ch = this.call.channel;
+        this.offs = [
+          ch.on("wb", (u) => {
+            this.stats.received++;
+            L.Y.applyUpdate(this.doc, unb642(u), "remote");
+          }),
+          // Someone just opened the board: send them what they are missing.
+          ch.on("wb-hello", (sv, from) => ch.send("wb", b642(L.Y.encodeStateAsUpdate(this.doc, unb642(sv))), from))
+        ];
+        this.doc.on("update", (u, origin) => {
+          if (origin === "local") {
+            this.stats.sent++;
+            ch.send("wb", b642(u)).catch(() => {
+            });
+            this.saveSoon();
+          }
+        });
+        this.map.observe((e) => {
+          if (e.transaction.origin !== "local") this.toScene();
+        });
+        ch.send("wb-hello", b642(L.Y.encodeStateVector(this.doc))).catch(() => {
+        });
+        const host = this.el.querySelector("#wbc");
+        host.innerHTML = "";
+        const tag = () => {
+          for (const el of host.querySelectorAll("button:not([data-tool]), [role=menuitem]:not([data-tool]), label:has(> input[type=radio]):not([data-tool])")) {
+            el.dataset.tool = "none";
+            el.dataset.why = "draws on the whiteboard on this screen; the board is saved with meet.save_whiteboard, which agents use to draw";
+          }
+        };
+        this.mo = new MutationObserver(tag);
+        this.mo.observe(host, { childList: true, subtree: true });
+        this.root = L.createRoot(host);
+        const dark = matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.dataset.theme !== "light";
+        this.root.render(L.React.createElement(L.Excalidraw, {
+          excalidrawAPI: (api) => {
+            this.api = api;
+            this.toScene();
+          },
+          initialData: { elements: this.elements(), appState: { viewBackgroundColor: dark ? "#121214" : "#ffffff" } },
+          theme: dark ? "dark" : "light",
+          onChange: (els) => this.fromScene(els),
+          UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false } }
+        }));
+      }
+      elements() {
+        return [...this.map?.values() ?? []].sort((a, b) => a.index < b.index ? -1 : a.index > b.index ? 1 : 0);
+      }
+      // Drawing on this screen: every element whose version moved goes into the shared document.
+      fromScene(els) {
+        if (this.applying || !this.map) return;
+        this.doc.transact(() => {
+          for (const el of els) {
+            const cur = this.map.get(el.id);
+            if (!cur || cur.version < el.version || cur.version === el.version && cur.versionNonce !== el.versionNonce && el.versionNonce < cur.versionNonce) this.map.set(el.id, JSON.parse(JSON.stringify(el)));
+          }
+        }, "local");
+      }
+      // Drawing from the others: put the merged document on screen.
+      toScene() {
+        if (!this.api) return;
+        this.applying = true;
+        try {
+          this.api.updateScene({ elements: this.elements() });
+        } finally {
+          this.applying = false;
+        }
+      }
+      saveSoon() {
+        clearTimeout(this.saveT);
+        this.saveT = setTimeout(() => this.save().catch((e) => console.warn("[meet] board save", e.message)), 2500);
+      }
+      async pictures() {
+        const els = this.elements().filter((e) => !e.isDeleted);
+        const appState = { exportBackground: true, viewBackgroundColor: "#ffffff", exportWithDarkMode: false };
+        const files = this.api?.getFiles?.() ?? null;
+        const svg = els.length ? (await this.L.exportToSvg({ elements: els, appState, files })).outerHTML : "";
+        let png = "";
+        if (els.length) {
+          const blob = await this.L.exportToBlob({ elements: els, appState, files, mimeType: "image/png" });
+          if (blob.size < 15e5) png = b642(new Uint8Array(await blob.arrayBuffer()));
+        }
+        return { els, svg, png };
+      }
+      async save() {
+        if (!this.doc) return;
+        const { els, svg, png } = await this.pictures();
+        await callTool("meet.save_whiteboard", { meeting: this.mid, state: b642(this.L.Y.encodeStateAsUpdate(this.doc)), elements: els, svg, ...png ? { png_base64: png } : {} });
+        this.stats.saves++;
+      }
+      hide(gone = false) {
+        if (gone) {
+          this.hidden = false;
+          this.teardown();
+          return;
+        }
+        this.hidden = true;
+        if (this.el) this.el.hidden = true;
+        this.call.render();
+      }
+      teardown() {
+        clearTimeout(this.saveT);
+        this.mo?.disconnect();
+        for (const off of this.offs ?? []) off();
+        this.offs = null;
+        try {
+          this.root?.unmount();
+        } catch {
+        }
+        this.root = null;
+        this.api = null;
+        this.doc?.destroy();
+        this.doc = null;
+        this.map = null;
+        this.el?.remove();
+        this.el = null;
+      }
+      renderHead() {
+        if (!this.el) return;
+        const s = this.status;
+        this.el.querySelector(".meet-wb-t").textContent = s?.title ?? "Whiteboard";
+        const canClose = this.call.amHost() || s?.opened_by === this.call.me.display_name;
+        const inSuite = !!this.call.notes?.status?.in_suite;
+        const html = `<button class="ui-btn is-quiet is-sm" data-tool="meet.export_whiteboard" data-act="wb-png">${icon("download", 16)} PNG</button>
+      <button class="ui-btn is-quiet is-sm" data-tool="meet.export_whiteboard" data-act="wb-svg">${icon("download", 16)} SVG</button>
+      ${inSuite ? `<form class="meet-wb-att" data-tool="meet.attach_whiteboard" data-act="wb-attach"><label class="ui-sr" for="wbto">Attach to</label><input class="ui-input" id="wbto" name="to" placeholder="crm:deal:Acme Dental or board:task:7"><button class="ui-btn is-sm" type="submit" data-tool="meet.attach_whiteboard">Attach</button></form>` : ""}
+      <button class="ui-btn is-ghost is-sm" data-tool="none" data-why="hides the whiteboard on this screen only" data-act="wb-hide">Hide</button>
+      ${canClose ? '<button class="ui-btn is-ghost is-sm" data-tool="meet.close_whiteboard" data-act="wb-close">Close for everyone</button>' : ""}`;
+        const a = this.el.querySelector("#wba");
+        if (a.dataset.html !== html) {
+          a.innerHTML = html;
+          a.dataset.html = html;
+        }
+      }
+      moreItems() {
+        if (this.status?.open && !this.hidden) return [];
+        return [this.status?.open ? ["wb-show", "none", "Show the whiteboard", "board", "shows the whiteboard on this screen again"] : ["wb-open", "meet.open_whiteboard", "Whiteboard", "board"]];
+      }
+      async onAct(a) {
+        if (a === "wb-open") {
+          this.hidden = false;
+          this.status = await callTool("meet.open_whiteboard", { meeting: this.mid });
+          await this.show();
+          return this.call.render();
+        }
+        if (a === "wb-show") {
+          this.hidden = false;
+          await this.show();
+          return this.call.render();
+        }
+        if (a === "wb-hide") return this.hide();
+        if (a === "wb-close") {
+          await this.save().catch(() => {
+          });
+          await callTool("meet.close_whiteboard", { meeting: this.mid });
+          return this.load();
+        }
+        if (a === "wb-png" || a === "wb-svg") {
+          await this.save();
+          const format = a === "wb-png" ? "png" : "svg";
+          const r = await callTool("meet.export_whiteboard", { meeting: this.mid, format });
+          const blob = format === "png" ? new Blob([unb642(r.png_base64)], { type: r.mime }) : new Blob([r.svg], { type: r.mime });
+          const url = URL.createObjectURL(blob);
+          const link = Object.assign(document.createElement("a"), { href: url, download: r.file_name.replace(/[^\w .-]+/g, "") });
+          document.body.append(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 6e4);
+        }
+      }
+      async onClick(e) {
+        const b = e.target.closest("button[data-act]");
+        if (!b || b.closest("form")) return;
+        b.disabled = true;
+        try {
+          await this.onAct(b.dataset.act);
+        } catch (err) {
+          toast(err.message);
+        } finally {
+          b.disabled = false;
+        }
+      }
+      async onSubmit(e) {
+        if (e.target.dataset.act !== "wb-attach") return;
+        e.preventDefault();
+        const to = String(new FormData(e.target).get("to") || "").trim();
+        if (!to) return;
+        try {
+          await this.save();
+          const r = await callTool("meet.attach_whiteboard", { meeting: this.mid, to });
+          toast(`Attached to ${r.attached}`);
+        } catch (err) {
+          toast(err.message);
+        }
+      }
+      snapshot() {
+        return { open: !!this.status?.open, shown: !!this.el && !this.el.hidden, elements: this.elements().filter((e) => !e.isDeleted).length, stats: this.stats };
+      }
+      stop() {
+        this.teardown();
+      }
+    };
+  }
+});
+
 // public/app/media/p2p.mjs
 var p2p_exports = {};
 __export(p2p_exports, {
@@ -1537,6 +1810,7 @@ var init_call = __esm({
     init_dom();
     init_notes();
     init_record();
+    init_board();
     SPEAK_LEVEL = 0.03;
     VIEWER_DELAY_MS = 2e3;
     Call = class {
@@ -1589,6 +1863,8 @@ var init_call = __esm({
         await this.notes.init().catch((e) => console.warn("[meet] notes", e.message));
         this.recording = new Recording(this);
         await this.recording.load();
+        this.whiteboard = new Whiteboard(this);
+        await this.whiteboard.load();
         this.levelT = setInterval(() => this.pollLevels(), 250);
         this.statT = setInterval(() => this.refreshTrouble(), 3e3);
         window.addEventListener("pagehide", this.onHide = () => {
@@ -1601,6 +1877,7 @@ var init_call = __esm({
         clearInterval(this.statT);
         this.notes?.stop();
         this.recording?.stop();
+        this.whiteboard?.stop();
         if (this.onHide) window.removeEventListener("pagehide", this.onHide);
         this.ro?.disconnect();
         await this.engine?.stop().catch(() => {
@@ -1851,6 +2128,7 @@ var init_call = __esm({
           if (b.what === "chat") this.loadChat();
           if (b.what === "meeting") this.loadStatus();
           if (b.what === "notes" || b.what === "participants" && this.notes?.status?.on) this.notes?.load();
+          if (b.what === "board") this.whiteboard?.load();
           if (b.what === "recording" || b.what === "participants" && this.recording?.status?.state === "recording") this.recording?.load();
         }, 60);
       }
@@ -2039,6 +2317,7 @@ var init_call = __esm({
         if (tr.innerHTML !== topr) tr.innerHTML = topr;
         this.renderNotices();
         this.renderStage();
+        this.whiteboard?.renderHead();
         this.renderBar();
         this.renderSide();
       }
@@ -2463,6 +2742,7 @@ var init_call = __esm({
           item("hand", "meet.raise_hand", hand ? "Lower hand" : "Raise hand", "hand"),
           item("layout", "meet.set_layout", this.layout === "grid" ? "Speaker view" : "Grid view", this.layout === "grid" ? "speaker" : "grid"),
           ...(this.recording?.moreItems() ?? []).map((x) => item(...x)),
+          ...(this.whiteboard?.moreItems() ?? []).map((x) => item(...x)),
           item("captions", "none", this.notes?.captions ? "Hide captions" : "Show captions", "captions", "shows or hides captions on this screen only"),
           item("info", "none", "Call details", "info", "opens call details")
         ].join("");
@@ -2487,6 +2767,7 @@ var init_call = __esm({
           if (a === "captions") return this.notes?.onAct("captions");
           if (a === "info") return this.openPanel("info");
           if (a.startsWith("rec-")) await this.recording?.onAct(a);
+          if (a.startsWith("wb-")) await this.whiteboard?.onAct(a);
         } catch (err) {
           toast(err.message);
         }
@@ -2938,7 +3219,7 @@ init_api();
 init_dom();
 
 // public/app/meet.css
-var meet_default = ".wos-meet{@keyframes meet-pulse{0%{box-shadow:0 0 color-mix(in srgb,var(--ui-accent) 45%,transparent)}to{box-shadow:0 0 0 16px transparent}}@keyframes meet-blink{50%{opacity:.35}}}.wos-meet .meet-top{max-width:1200px;margin:0 auto}.wos-meet .meet-top-r{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ui-ink-2)}.wos-meet .meet-brand svg{height:22px;width:22px}.wos-meet .meet-h1{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);letter-spacing:var(--ui-display-track,-.02em);font-size:clamp(30px,5vw,48px);line-height:1.08;margin:0 0 14px}.wos-meet .meet-h{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);font-size:24px;line-height:1.2;margin:0 0 8px}.wos-meet .meet-h2{font-size:17px;font-weight:var(--ui-weight-strong,600);margin:0}.wos-meet .meet-h3{font-size:15px;font-weight:var(--ui-weight-strong,600);margin:0 0 8px}.wos-meet .meet-lead{font-size:17px;color:var(--ui-ink-2);max-width:640px;margin:0 0 24px;line-height:1.55}.wos-meet .meet-home{max-width:960px;margin:0 auto;padding:clamp(24px,6vw,72px) 16px 64px}.wos-meet .meet-hero{margin-bottom:48px}.wos-meet .meet-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.wos-meet .meet-joinform{display:flex;gap:8px;flex:1;min-width:min(100%,320px);max-width:440px}.wos-meet .meet-joinform .ui-input{min-height:42px}.wos-meet .meet-section{margin-top:36px}.wos-meet .meet-section-h{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}.wos-meet .meet-section-a{display:flex;gap:8px}.wos-meet .meet-list{display:grid;gap:8px;margin-bottom:20px}.wos-meet .meet-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:var(--ui-card);border:1px solid var(--ui-card-line);border-radius:var(--ui-radius);flex-wrap:wrap}.wos-meet .meet-row-m{display:grid;gap:2px;min-width:0}.wos-meet .meet-row-m b{font-weight:var(--ui-weight-strong,600)}.wos-meet .meet-row-m .ui-mute{font-size:13.5px}.wos-meet .meet-row-a{display:flex;gap:6px;flex-wrap:wrap}.wos-meet .meet-schedule{margin-top:8px}.wos-meet .meet-form-a{display:flex;justify-content:flex-end}.wos-meet .meet-ways{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wos-meet .meet-ways p{margin:0 0 8px}.wos-meet .meet-ways code,.wos-meet .meet-cmd{font-family:var(--ui-mono,ui-monospace),monospace;font-size:13px}.wos-meet .meet-doctor{margin-top:12px}.wos-meet .meet-checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px}.wos-meet .meet-center{min-height:calc(100svh - 80px);display:grid;place-items:center;padding:16px}.wos-meet .meet-narrow{width:min(520px,100%);padding:28px}.wos-meet .meet-cmd{white-space:pre-wrap;word-break:break-all;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);padding:12px;margin:12px 0}.wos-meet .meet-waiting{text-align:center}.wos-meet .meet-waiting .ui-btn{margin-top:8px}.wos-meet .meet-pulse{display:block;width:14px;height:14px;margin:4px auto 16px;border-radius:50%;background:var(--ui-accent);animation:meet-pulse 1.6s ease-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-pulse{animation:none}}.wos-meet .meet-pre{max-width:1100px;margin:0 auto;padding:clamp(16px,4vw,48px) 16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:clamp(20px,4vw,48px);align-items:center}.wos-meet .meet-preview{width:100%}.wos-meet .meet-preview video{transform:scaleX(-1)}.wos-meet .meet-pre-f .ui-btn.is-block{margin-top:4px}.wos-meet .meet-pre-f .ui-hint{margin-top:12px}.wos-meet .meet-perm{text-align:center;min-height:1em}.wos-meet .ui-tile>.ui-avatar{position:relative;z-index:0}.wos-meet .ui-tile video{opacity:0;transition:opacity var(--ui-dur) var(--ui-ease)}.wos-meet .ui-tile.has-video video,.wos-meet .meet-preview:not(.is-cam-off) video{opacity:1;z-index:1}.wos-meet .ui-tile.has-video>.ui-avatar{visibility:hidden}.wos-meet .ui-tile .ui-tile-n,.wos-meet .ui-tile .ui-tile-tag{z-index:2}.wos-meet .ui-tile.is-mine video{transform:scaleX(-1)}.wos-meet .ui-tile.is-screen video{object-fit:contain;background:#000}.wos-meet .ui-tile.is-trouble{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ui-bad) 60%,transparent)}.wos-meet .ui-callbar button svg{pointer-events:none}.wos-meet .ui-callbar button.is-on{background:var(--ui-accent);color:var(--ui-on-accent);border-color:transparent}.wos-meet .meet-call{height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}.wos-meet .meet-call-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 4px}.wos-meet .meet-call-t{display:flex;align-items:baseline;gap:10px;min-width:0}.wos-meet .meet-call-t b{font-weight:var(--ui-weight-strong,600);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-mode{font-size:13px;white-space:nowrap}.wos-meet .meet-notices{display:grid;gap:6px;padding:0 16px}.wos-meet .meet-notices:not(:empty){padding-top:6px}.wos-meet .meet-notices .ui-notice{align-items:center;flex-wrap:wrap}.wos-meet .meet-notices .ui-notice>span{flex:1;min-width:200px}.wos-meet .meet-body{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;padding:8px 16px 0;gap:12px}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr) 340px}.wos-meet .meet-stage{position:relative;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden;border-radius:var(--ui-radius-lg)}.wos-meet .meet-stage .ui-calls{min-height:0;overflow:auto;align-content:center;justify-content:center}.wos-meet .meet-main:empty{display:none}.wos-meet .meet-stage.has-big{grid-template-rows:minmax(0,1fr) auto}.wos-meet .meet-stage.has-big .meet-main{min-height:0;display:grid;padding:8px;background:color-mix(in srgb,var(--ui-ink) 6%,var(--ui-bg));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0}.wos-meet .meet-stage.has-big .meet-main>.ui-tile{aspect-ratio:auto;height:100%;min-height:0;grid-column:auto}.wos-meet .meet-stage.has-big .meet-main>.ui-tile video{object-fit:contain;background:#000}.wos-meet .ui-calls.is-strip{display:flex;overflow-x:auto;align-content:start;border-radius:0 0 var(--ui-radius-lg) var(--ui-radius-lg)}.wos-meet .ui-calls.is-strip:empty{display:none}.wos-meet .ui-calls.is-strip>.ui-tile{flex:0 0 180px;aspect-ratio:16/10}.wos-meet .meet-tap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5}.wos-meet .meet-bar{padding:10px 16px calc(10px + env(safe-area-inset-bottom))}.wos-meet .meet-bar-sep{width:1px;height:28px;background:var(--ui-line);margin:0 4px}.wos-meet .meet-bar button{position:relative}.wos-meet .meet-dot{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--ui-accent);color:var(--ui-on-accent);font:600 11px/18px var(--ui-font)}.wos-meet .meet-side{min-height:0;display:none;flex-direction:column;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}.wos-meet .meet-side:not(:empty){display:flex}.wos-meet .meet-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 0;border-bottom:1px solid var(--ui-line)}.wos-meet .meet-side-h .ui-tabs{border:0}.wos-meet .meet-side-b{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column}.wos-meet .meet-side-sub{font-size:12px;font-weight:500;color:var(--ui-ink-3);margin:12px 0 6px}.wos-meet .meet-side-sub:first-child{margin-top:0}.wos-meet .meet-side-a{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px}.wos-meet .meet-side-a.is-col{flex-direction:column;align-items:stretch;margin-top:16px}.wos-meet .meet-side-a.is-col .ui-btn{justify-content:flex-start}.wos-meet .meet-plist{list-style:none;margin:0;padding:0;display:grid;gap:2px}.wos-meet .meet-prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 4px;border-radius:var(--ui-radius-sm)}.wos-meet .meet-prow:hover{background:var(--ui-hover)}.wos-meet .meet-prow-m{display:grid;gap:2px;min-width:0;font-size:14px}.wos-meet .meet-prow-m>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-prow-c{display:flex;gap:4px;flex-wrap:wrap}.wos-meet .meet-prow-c:empty{display:none}.wos-meet .meet-prow-i{color:var(--ui-ink-3);display:grid}.wos-meet .meet-prow-i.is-off{color:var(--ui-bad)}.wos-meet .meet-prow-a{grid-column:2/-1;display:none;flex-wrap:wrap;gap:4px}.wos-meet .meet-prow:hover .meet-prow-a,.wos-meet .meet-prow:focus-within .meet-prow-a,.wos-meet .meet-prow-a.is-on{display:flex}@media(hover:none){.wos-meet .meet-prow-a{display:flex}}.wos-meet .meet-chatlist{list-style:none;margin:0;padding:0;flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px}.wos-meet .meet-cmsg{display:grid;gap:2px;font-size:14px}.wos-meet .meet-cmsg-h{font-size:12.5px}.wos-meet .meet-cmsg-b{white-space:pre-wrap;overflow-wrap:anywhere}.wos-meet .meet-composer{margin:10px 0 0}.wos-meet .meet-kv{font-size:13.5px}.wos-meet .meet-link code{font-family:var(--ui-mono,ui-monospace),monospace;font-size:12.5px;word-break:break-all}.wos-meet .meet-hosts{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13.5px}.wos-meet .meet-hosts li{display:flex;gap:6px;align-items:center}.wos-meet .meet-hostcmd{margin-top:12px;font-size:13.5px}.wos-meet .meet-call-tr{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.wos-meet .meet-notes-on .ui-dot,.wos-meet .meet-rec-on .ui-dot{animation:meet-blink 1.6s ease-in-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-notes-on .ui-dot,.wos-meet .meet-rec-on .ui-dot{animation:none}}.wos-meet .meet-dot.is-rec{min-width:9px;width:9px;height:9px;padding:0;top:2px;right:2px;background:var(--ui-bad)}.wos-meet .meet-cap{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none;z-index:4;padding:0 12px}.wos-meet .meet-cap:empty{display:none}.wos-meet .meet-captions{max-width:min(760px,100%);display:grid;gap:2px;padding:8px 14px;border-radius:var(--ui-radius);background:color-mix(in srgb,#000 72%,transparent);color:#fff;font-size:15px;line-height:1.45}.wos-meet .meet-captions p{margin:0}.wos-meet .meet-captions b{font-weight:var(--ui-weight-strong,600);margin-right:6px;color:color-mix(in srgb,#fff 78%,var(--ui-accent))}.wos-meet .meet-stage.has-big .meet-cap{bottom:132px}.wos-meet .meet-more{position:fixed;inset:0;z-index:30}.wos-meet .meet-more-in{position:absolute;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));min-width:220px;display:grid;padding:6px;background:var(--ui-surface);border:1px solid var(--ui-line-2);border-radius:var(--ui-radius-lg);box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-more-i{display:flex;align-items:center;gap:10px;padding:9px 10px;font:inherit;font-size:14px;color:var(--ui-ink);background:none;border:0;border-radius:var(--ui-radius-sm);cursor:pointer;text-align:left}.wos-meet .meet-more-i:hover,.wos-meet .meet-more-i:focus-visible{background:var(--ui-hover)}.wos-meet .meet-more-i svg{color:var(--ui-ink-2);flex:none}.wos-meet .meet-notes-h{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-bottom:10px}.wos-meet .meet-notes-h .ui-dot{margin-top:6px}.wos-meet .meet-notes-me{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:14px}.wos-meet .meet-nrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px;font-size:14px}.wos-meet .meet-transcript{list-style:none;margin:0;padding:0;display:grid;gap:10px;font-size:14px}.wos-meet .meet-transcript li{display:grid;gap:1px}.wos-meet .meet-tr-h{font-size:12.5px}.wos-meet .meet-notes-b{font-size:14px;line-height:1.5;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius);padding:10px 12px;margin-bottom:8px}.wos-meet .meet-notes-b p{margin:0 0 6px}.wos-meet .meet-notes-b ul{margin:0 0 8px;padding-left:18px}.wos-meet .meet-send{display:grid;gap:6px}.wos-meet .meet-send form{display:flex;gap:6px}.wos-meet .meet-send .ui-input{min-width:0;flex:1}.wos-meet .meet-send p{margin:0}.wos-meet .meet-dlg p{margin:0 0 10px;line-height:1.5}.wos-meet .meet-join-notice{margin-bottom:12px}.wos-meet .meet-settings{margin-top:12px}.wos-meet .meet-settings summary{cursor:pointer;margin:0}.wos-meet .meet-settings form{margin-top:12px}@media(max-width:760px){.wos-meet .meet-pre{grid-template-columns:1fr}.wos-meet .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}.wos-meet .meet-ways{grid-template-columns:1fr}.wos-meet .meet-body{padding:6px 8px 0}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}.wos-meet .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}.wos-meet .meet-bar button{width:38px;height:38px;flex:none}.wos-meet .meet-bar [data-act=info],.wos-meet .meet-bar .meet-hide-sm{display:none}.wos-meet .meet-more-in{left:8px;right:8px}.wos-meet .meet-cap{bottom:8px}.wos-meet .meet-captions{font-size:14px}.wos-meet .meet-bar-sep{display:none}.wos-meet .meet-bar button.is-leave{width:auto;padding:0 14px}.wos-meet .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}.wos-meet .meet-mode{display:none}}\n";
+var meet_default = ".wos-meet{@keyframes meet-pulse{0%{box-shadow:0 0 color-mix(in srgb,var(--ui-accent) 45%,transparent)}to{box-shadow:0 0 0 16px transparent}}@keyframes meet-blink{50%{opacity:.35}}}.wos-meet .meet-top{max-width:1200px;margin:0 auto}.wos-meet .meet-top-r{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ui-ink-2)}.wos-meet .meet-brand svg{height:22px;width:22px}.wos-meet .meet-h1{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);letter-spacing:var(--ui-display-track,-.02em);font-size:clamp(30px,5vw,48px);line-height:1.08;margin:0 0 14px}.wos-meet .meet-h{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);font-size:24px;line-height:1.2;margin:0 0 8px}.wos-meet .meet-h2{font-size:17px;font-weight:var(--ui-weight-strong,600);margin:0}.wos-meet .meet-h3{font-size:15px;font-weight:var(--ui-weight-strong,600);margin:0 0 8px}.wos-meet .meet-lead{font-size:17px;color:var(--ui-ink-2);max-width:640px;margin:0 0 24px;line-height:1.55}.wos-meet .meet-home{max-width:960px;margin:0 auto;padding:clamp(24px,6vw,72px) 16px 64px}.wos-meet .meet-hero{margin-bottom:48px}.wos-meet .meet-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.wos-meet .meet-joinform{display:flex;gap:8px;flex:1;min-width:min(100%,320px);max-width:440px}.wos-meet .meet-joinform .ui-input{min-height:42px}.wos-meet .meet-section{margin-top:36px}.wos-meet .meet-section-h{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}.wos-meet .meet-section-a{display:flex;gap:8px}.wos-meet .meet-list{display:grid;gap:8px;margin-bottom:20px}.wos-meet .meet-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:var(--ui-card);border:1px solid var(--ui-card-line);border-radius:var(--ui-radius);flex-wrap:wrap}.wos-meet .meet-row-m{display:grid;gap:2px;min-width:0}.wos-meet .meet-row-m b{font-weight:var(--ui-weight-strong,600)}.wos-meet .meet-row-m .ui-mute{font-size:13.5px}.wos-meet .meet-row-a{display:flex;gap:6px;flex-wrap:wrap}.wos-meet .meet-schedule{margin-top:8px}.wos-meet .meet-form-a{display:flex;justify-content:flex-end}.wos-meet .meet-ways{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wos-meet .meet-ways p{margin:0 0 8px}.wos-meet .meet-ways code,.wos-meet .meet-cmd{font-family:var(--ui-mono,ui-monospace),monospace;font-size:13px}.wos-meet .meet-doctor{margin-top:12px}.wos-meet .meet-checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px}.wos-meet .meet-center{min-height:calc(100svh - 80px);display:grid;place-items:center;padding:16px}.wos-meet .meet-narrow{width:min(520px,100%);padding:28px}.wos-meet .meet-cmd{white-space:pre-wrap;word-break:break-all;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);padding:12px;margin:12px 0}.wos-meet .meet-waiting{text-align:center}.wos-meet .meet-waiting .ui-btn{margin-top:8px}.wos-meet .meet-pulse{display:block;width:14px;height:14px;margin:4px auto 16px;border-radius:50%;background:var(--ui-accent);animation:meet-pulse 1.6s ease-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-pulse{animation:none}}.wos-meet .meet-pre{max-width:1100px;margin:0 auto;padding:clamp(16px,4vw,48px) 16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:clamp(20px,4vw,48px);align-items:center}.wos-meet .meet-preview{width:100%}.wos-meet .meet-preview video{transform:scaleX(-1)}.wos-meet .meet-pre-f .ui-btn.is-block{margin-top:4px}.wos-meet .meet-pre-f .ui-hint{margin-top:12px}.wos-meet .meet-perm{text-align:center;min-height:1em}.wos-meet .ui-tile>.ui-avatar{position:relative;z-index:0}.wos-meet .ui-tile video{opacity:0;transition:opacity var(--ui-dur) var(--ui-ease)}.wos-meet .ui-tile.has-video video,.wos-meet .meet-preview:not(.is-cam-off) video{opacity:1;z-index:1}.wos-meet .ui-tile.has-video>.ui-avatar{visibility:hidden}.wos-meet .ui-tile .ui-tile-n,.wos-meet .ui-tile .ui-tile-tag{z-index:2}.wos-meet .ui-tile.is-mine video{transform:scaleX(-1)}.wos-meet .ui-tile.is-screen video{object-fit:contain;background:#000}.wos-meet .ui-tile.is-trouble{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ui-bad) 60%,transparent)}.wos-meet .ui-callbar button svg{pointer-events:none}.wos-meet .ui-callbar button.is-on{background:var(--ui-accent);color:var(--ui-on-accent);border-color:transparent}.wos-meet .meet-call{height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}.wos-meet .meet-call-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 4px}.wos-meet .meet-call-t{display:flex;align-items:baseline;gap:10px;min-width:0}.wos-meet .meet-call-t b{font-weight:var(--ui-weight-strong,600);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-mode{font-size:13px;white-space:nowrap}.wos-meet .meet-notices{display:grid;gap:6px;padding:0 16px}.wos-meet .meet-notices:not(:empty){padding-top:6px}.wos-meet .meet-notices .ui-notice{align-items:center;flex-wrap:wrap}.wos-meet .meet-notices .ui-notice>span{flex:1;min-width:200px}.wos-meet .meet-body{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;padding:8px 16px 0;gap:12px}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr) 340px}.wos-meet .meet-stage{position:relative;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden;border-radius:var(--ui-radius-lg)}.wos-meet .meet-stage .ui-calls{min-height:0;overflow:auto;align-content:center;justify-content:center}.wos-meet .meet-main:empty{display:none}.wos-meet .meet-stage.has-big{grid-template-rows:minmax(0,1fr) auto}.wos-meet .meet-stage.has-big .meet-main{min-height:0;display:grid;padding:8px;background:color-mix(in srgb,var(--ui-ink) 6%,var(--ui-bg));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0}.wos-meet .meet-stage.has-big .meet-main>.ui-tile{aspect-ratio:auto;height:100%;min-height:0;grid-column:auto}.wos-meet .meet-stage.has-big .meet-main>.ui-tile video{object-fit:contain;background:#000}.wos-meet .ui-calls.is-strip{display:flex;overflow-x:auto;align-content:start;border-radius:0 0 var(--ui-radius-lg) var(--ui-radius-lg)}.wos-meet .ui-calls.is-strip:empty{display:none}.wos-meet .ui-calls.is-strip>.ui-tile{flex:0 0 180px;aspect-ratio:16/10}.wos-meet .meet-tap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5}.wos-meet .meet-bar{padding:10px 16px calc(10px + env(safe-area-inset-bottom))}.wos-meet .meet-bar-sep{width:1px;height:28px;background:var(--ui-line);margin:0 4px}.wos-meet .meet-bar button{position:relative}.wos-meet .meet-dot{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--ui-accent);color:var(--ui-on-accent);font:600 11px/18px var(--ui-font)}.wos-meet .meet-side{min-height:0;display:none;flex-direction:column;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}.wos-meet .meet-side:not(:empty){display:flex}.wos-meet .meet-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 0;border-bottom:1px solid var(--ui-line)}.wos-meet .meet-side-h .ui-tabs{border:0}.wos-meet .meet-side-b{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column}.wos-meet .meet-side-sub{font-size:12px;font-weight:500;color:var(--ui-ink-3);margin:12px 0 6px}.wos-meet .meet-side-sub:first-child{margin-top:0}.wos-meet .meet-side-a{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px}.wos-meet .meet-side-a.is-col{flex-direction:column;align-items:stretch;margin-top:16px}.wos-meet .meet-side-a.is-col .ui-btn{justify-content:flex-start}.wos-meet .meet-plist{list-style:none;margin:0;padding:0;display:grid;gap:2px}.wos-meet .meet-prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 4px;border-radius:var(--ui-radius-sm)}.wos-meet .meet-prow:hover{background:var(--ui-hover)}.wos-meet .meet-prow-m{display:grid;gap:2px;min-width:0;font-size:14px}.wos-meet .meet-prow-m>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-prow-c{display:flex;gap:4px;flex-wrap:wrap}.wos-meet .meet-prow-c:empty{display:none}.wos-meet .meet-prow-i{color:var(--ui-ink-3);display:grid}.wos-meet .meet-prow-i.is-off{color:var(--ui-bad)}.wos-meet .meet-prow-a{grid-column:2/-1;display:none;flex-wrap:wrap;gap:4px}.wos-meet .meet-prow:hover .meet-prow-a,.wos-meet .meet-prow:focus-within .meet-prow-a,.wos-meet .meet-prow-a.is-on{display:flex}@media(hover:none){.wos-meet .meet-prow-a{display:flex}}.wos-meet .meet-chatlist{list-style:none;margin:0;padding:0;flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px}.wos-meet .meet-cmsg{display:grid;gap:2px;font-size:14px}.wos-meet .meet-cmsg-h{font-size:12.5px}.wos-meet .meet-cmsg-b{white-space:pre-wrap;overflow-wrap:anywhere}.wos-meet .meet-composer{margin:10px 0 0}.wos-meet .meet-kv{font-size:13.5px}.wos-meet .meet-link code{font-family:var(--ui-mono,ui-monospace),monospace;font-size:12.5px;word-break:break-all}.wos-meet .meet-hosts{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13.5px}.wos-meet .meet-hosts li{display:flex;gap:6px;align-items:center}.wos-meet .meet-hostcmd{margin-top:12px;font-size:13.5px}.wos-meet .meet-call-tr{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.wos-meet .meet-notes-on .ui-dot,.wos-meet .meet-rec-on .ui-dot{animation:meet-blink 1.6s ease-in-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-notes-on .ui-dot,.wos-meet .meet-rec-on .ui-dot{animation:none}}.wos-meet .meet-dot.is-rec{min-width:9px;width:9px;height:9px;padding:0;top:2px;right:2px;background:var(--ui-bad)}.wos-meet .meet-cap{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none;z-index:4;padding:0 12px}.wos-meet .meet-cap:empty{display:none}.wos-meet .meet-captions{max-width:min(760px,100%);display:grid;gap:2px;padding:8px 14px;border-radius:var(--ui-radius);background:color-mix(in srgb,#000 72%,transparent);color:#fff;font-size:15px;line-height:1.45}.wos-meet .meet-captions p{margin:0}.wos-meet .meet-captions b{font-weight:var(--ui-weight-strong,600);margin-right:6px;color:color-mix(in srgb,#fff 78%,var(--ui-accent))}.wos-meet .meet-stage.has-big .meet-cap{bottom:132px}.wos-meet .meet-more{position:fixed;inset:0;z-index:30}.wos-meet .meet-more-in{position:absolute;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));min-width:220px;display:grid;padding:6px;background:var(--ui-surface);border:1px solid var(--ui-line-2);border-radius:var(--ui-radius-lg);box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-more-i{display:flex;align-items:center;gap:10px;padding:9px 10px;font:inherit;font-size:14px;color:var(--ui-ink);background:none;border:0;border-radius:var(--ui-radius-sm);cursor:pointer;text-align:left}.wos-meet .meet-more-i:hover,.wos-meet .meet-more-i:focus-visible{background:var(--ui-hover)}.wos-meet .meet-more-i svg{color:var(--ui-ink-2);flex:none}.wos-meet .meet-notes-h{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-bottom:10px}.wos-meet .meet-notes-h .ui-dot{margin-top:6px}.wos-meet .meet-notes-me{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:14px}.wos-meet .meet-nrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px;font-size:14px}.wos-meet .meet-transcript{list-style:none;margin:0;padding:0;display:grid;gap:10px;font-size:14px}.wos-meet .meet-transcript li{display:grid;gap:1px}.wos-meet .meet-tr-h{font-size:12.5px}.wos-meet .meet-notes-b{font-size:14px;line-height:1.5;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius);padding:10px 12px;margin-bottom:8px}.wos-meet .meet-notes-b p{margin:0 0 6px}.wos-meet .meet-notes-b ul{margin:0 0 8px;padding-left:18px}.wos-meet .meet-send{display:grid;gap:6px}.wos-meet .meet-send form{display:flex;gap:6px}.wos-meet .meet-send .ui-input{min-width:0;flex:1}.wos-meet .meet-send p{margin:0}.wos-meet .meet-dlg p{margin:0 0 10px;line-height:1.5}.wos-meet .meet-join-notice{margin-bottom:12px}.wos-meet .meet-settings{margin-top:12px}.wos-meet .meet-settings summary{cursor:pointer;margin:0}.wos-meet .meet-settings form{margin-top:12px}.wos-meet .meet-wb{position:absolute;inset:0;z-index:6;display:grid;grid-template-rows:auto minmax(0,1fr);background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}.wos-meet .meet-wb[hidden]{display:none}.wos-meet .meet-wb-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--ui-line);flex-wrap:wrap}.wos-meet .meet-wb-t{font-weight:var(--ui-weight-strong,600);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.wos-meet .meet-wb-a{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.wos-meet .meet-wb-att{display:flex;gap:6px}.wos-meet .meet-wb-att .ui-input{min-height:32px;width:230px}.wos-meet .meet-wb-c{position:relative;min-height:0}.wos-meet .meet-wb-c .excalidraw{--ui-pad:0}@media(max-width:760px){.wos-meet .meet-pre{grid-template-columns:1fr}.wos-meet .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}.wos-meet .meet-ways{grid-template-columns:1fr}.wos-meet .meet-body{padding:6px 8px 0}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}.wos-meet .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}.wos-meet .meet-bar button{width:38px;height:38px;flex:none}.wos-meet .meet-bar [data-act=info],.wos-meet .meet-bar .meet-hide-sm{display:none}.wos-meet .meet-more-in{left:8px;right:8px}.wos-meet .meet-cap{bottom:8px}.wos-meet .meet-captions{font-size:14px}.wos-meet .meet-wb-att{display:none}.wos-meet .meet-wb-h{padding:4px 6px 4px 10px}.wos-meet .meet-bar-sep{display:none}.wos-meet .meet-bar button.is-leave{width:auto;padding:0 14px}.wos-meet .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}.wos-meet .meet-mode{display:none}}\n";
 
 // screens/index.mjs
 var BASE = "/a/meet";

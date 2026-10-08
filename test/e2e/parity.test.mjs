@@ -156,6 +156,12 @@ test('every action on every screen has a tool, at desk and phone width', async (
     await host.click('#more [data-act=rec-stop]');
     await host.waitForSelector('#notices [data-act=rec-download]');
     await check(host, 'recording ready');
+    await host.click('#bar [data-act=more]');
+    await host.click('#more [data-act=wb-open]');
+    await host.waitForSelector('.meet-wb .excalidraw canvas', { timeout: 30000 });
+    await host.waitForTimeout(800);
+    await check(host, 'whiteboard');
+    await host.click('.meet-wb [data-act=wb-close]');
     await check(g.page, 'call, guest');
 
     // Leaving, and a "help carry this call" link opened in a browser.

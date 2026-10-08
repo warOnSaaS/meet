@@ -105,6 +105,7 @@ export default async function register(ctx) {
         m.notes = await db.get('SELECT * FROM meeting_notes WHERE meeting_id = ?', [m.id]);
         m.notes_consents = await db.all('SELECT * FROM meet_notes_consents WHERE meeting_id = ?', [m.id]);
         m.recordings = await db.all('SELECT * FROM meet_recordings WHERE meeting_id = ?', [m.id]);
+        m.whiteboards = await db.all('SELECT id, title, elements, svg, attached, created_at, updated_at FROM meet_boards WHERE meeting_id = ?', [m.id]);
         m.recording_consents = await db.all('SELECT c.* FROM meet_recording_consents c JOIN meet_recordings r ON r.id = c.recording_id WHERE r.meeting_id = ?', [m.id]);
       }
       return { meetings };

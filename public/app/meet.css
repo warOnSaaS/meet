@@ -161,6 +161,17 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
 .meet-settings summary{cursor:pointer;margin:0}
 .meet-settings form{margin-top:12px}
 
+/* whiteboard: over the stage, the call keeps running underneath */
+.meet-wb{position:absolute;inset:0;z-index:6;display:grid;grid-template-rows:auto minmax(0,1fr);background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}
+.meet-wb[hidden]{display:none}
+.meet-wb-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--ui-line);flex-wrap:wrap}
+.meet-wb-t{font-weight:var(--ui-weight-strong,600);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.meet-wb-a{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.meet-wb-att{display:flex;gap:6px}
+.meet-wb-att .ui-input{min-height:32px;width:230px}
+.meet-wb-c{position:relative;min-height:0}
+.meet-wb-c .excalidraw{--ui-pad:0}
+
 /* ---------- phone ---------- */
 @media (max-width:760px){
   .meet-pre{grid-template-columns:1fr}
@@ -175,6 +186,8 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
   .meet-more-in{left:8px;right:8px}
   .meet-cap{bottom:8px}
   .meet-captions{font-size:14px}
+  .meet-wb-att{display:none}
+  .meet-wb-h{padding:4px 6px 4px 10px}
   .meet-bar-sep{display:none}
   .meet-bar button.is-leave{width:auto;padding:0 14px}
   .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}

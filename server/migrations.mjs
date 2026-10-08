@@ -116,4 +116,16 @@ ALTER TABLE meet_recordings ADD COLUMN mime TEXT;
 CREATE INDEX IF NOT EXISTS meet_recordings_meeting ON meet_recordings (meeting_id, started_at);
 `,
   },
+  {
+    id: 6,
+    name: 'whiteboards',
+    sql: `
+CREATE TABLE IF NOT EXISTS meet_boards (
+  id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, title TEXT NOT NULL,
+  state TEXT, elements TEXT, svg TEXT, png TEXT, is_open INTEGER NOT NULL DEFAULT 0, opened_by TEXT, attached TEXT,
+  created_at BIGINT NOT NULL, updated_at BIGINT
+);
+CREATE INDEX IF NOT EXISTS meet_boards_meeting ON meet_boards (meeting_id);
+`,
+  },
 ];
