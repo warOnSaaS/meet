@@ -62,7 +62,7 @@ function meetingOut(ctx, m, extra = {}) {
 }
 const partOut = (p, inCall) => p && ({
   id: p.id, display_name: p.display_name, role: p.role, status: p.status, kind: p.kind, is_guest: !p.user_id,
-  audio_on: !!p.audio_on, video_on: !!p.video_on, sharing: !!p.sharing, hand_raised: !!p.hand_raised, layout: p.layout,
+  audio_on: !!p.audio_on, video_on: !!p.video_on, background: p.background ?? 'none', sharing: !!p.sharing, hand_raised: !!p.hand_raised, layout: p.layout,
   in_call: inCall ? inCall.has(p.id) : undefined,
 });
 
@@ -394,6 +394,19 @@ export const tools = [
     },
   },
   {
+    name: 'meet.set_background', scope: 'write', confirm: 'none', events: ['meet.participant.media'],
+    description: 'Blur the background behind you on your own camera, or stop. Done on your device (MediaPipe selfie segmentation); nobody else\'s camera can be changed.',
+    input: { type: 'object', required: ['meeting', 'background'], properties: { meeting: MEETING, background: { type: 'string', enum: ['none', 'blur'], description: 'blur, or none' } } },
+    async handler(ctx, a) {
+      const m = await meetingRow(ctx, a.meeting);
+      const p = await requireIn(ctx, m);
+      if (!p) fail('forbidden', 'Join the meeting first.', 403);
+      await ctx.db.run('UPDATE meeting_participants SET background = ? WHERE id = ?', [a.background, p.id]);
+      await ctx.room.broadcast(m.id, 'cmd', { to_pid: p.id, background: a.background });
+      return { background: a.background };
+    },
+  },
+  {
     name: 'meet.mute_participant', scope: 'write', confirm: 'none', events: ['meet.participant.muted'],
     description: 'Host: mute someone\'s microphone, or turn off their camera. Nobody can turn another person\'s mic or camera on; you can only ask.',
     input: { type: 'object', required: ['meeting'], properties: { meeting: MEETING, participant: PARTICIPANT, all: bool('Mute everyone except you'), video: bool('Turn their camera off as well') } },
@@ -640,7 +653,7 @@ const TITLES = {
   'meet.raise_hand': 'Raise or lower my hand', 'meet.send_chat': 'Send a chat message', 'meet.list_chat': 'Read the chat', 'meet.huddle': 'Open a huddle',
   'meet.add_host': 'Help carry this call', 'meet.list_hosts': 'List computers carrying the call', 'meet.export': 'Export everything',
   'meet.doctor': 'Check calls can connect', 'meet.start_recording': 'Start recording', 'meet.stop_recording': 'Stop recording',
-  'meet.get_transcript': 'Get the transcript', 'meet.summarise': 'Write meeting notes', 'meet.join_as_agent': 'Join as an agent',
+  'meet.set_background': 'Blur my background', 'meet.get_transcript': 'Get the transcript', 'meet.summarise': 'Write meeting notes', 'meet.join_as_agent': 'Join as an agent',
 };
 Object.assign(TITLES, NOTES_TITLES, RECORDING_TITLES, BOARD_TITLES);
 for (const t of tools) t.title = TITLES[t.name] ?? t.name;

@@ -128,4 +128,9 @@ CREATE TABLE IF NOT EXISTS meet_boards (
 CREATE INDEX IF NOT EXISTS meet_boards_meeting ON meet_boards (meeting_id);
 `,
   },
+  {
+    id: 7,
+    name: 'camera background',
+    sql: `ALTER TABLE meeting_participants ADD COLUMN background TEXT NOT NULL DEFAULT 'none';`,
+  },
 ];

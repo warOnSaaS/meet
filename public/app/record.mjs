@@ -180,7 +180,7 @@ class Compositor {
     for (const p of c.people) {
       if (!this.included.has(p.id) || !(p.in_call || p.id === c.me.id)) continue;
       const mine = p.id === c.me.id;
-      const cam = mine ? (c.videoOn ? c.local.cam : null) : (p.video_on ? c.remoteFor(p.id, 'cam') : null);
+      const cam = mine ? (c.videoOn ? c.camTrack() : null) : (p.video_on ? c.remoteFor(p.id, 'cam') : null);
       const screen = mine ? c.local.screen : (p.sharing ? c.remoteFor(p.id, 'screen') : null);
       const mic = mine ? (c.audioOn ? c.local.mic : null) : c.remoteFor(p.id, 'mic');
       out.push({ p, cam, screen, mic, mine });

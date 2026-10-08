@@ -1169,7 +1169,7 @@ var init_record = __esm({
         for (const p of c.people) {
           if (!this.included.has(p.id) || !(p.in_call || p.id === c.me.id)) continue;
           const mine = p.id === c.me.id;
-          const cam = mine ? c.videoOn ? c.local.cam : null : p.video_on ? c.remoteFor(p.id, "cam") : null;
+          const cam = mine ? c.videoOn ? c.camTrack() : null : p.video_on ? c.remoteFor(p.id, "cam") : null;
           const screen = mine ? c.local.screen : p.sharing ? c.remoteFor(p.id, "screen") : null;
           const mic = mine ? c.audioOn ? c.local.mic : null : c.remoteFor(p.id, "mic");
           out.push({ p, cam, screen, mic, mine });
@@ -1788,6 +1788,134 @@ var init_livekit = __esm({
   }
 });
 
+// public/app/blur.mjs
+var blur_exports = {};
+__export(blur_exports, {
+  Blur: () => Blur
+});
+async function segmenter(cpuOnly = false) {
+  if (cpuOnly) segP = null;
+  if (!segP) segP = (async () => {
+    const { FilesetResolver, ImageSegmenter, WASM, MODEL } = await import(
+      /* @vite-ignore */
+      assetUrl("blur.js")
+    );
+    const files = await FilesetResolver.forVisionTasks(WASM);
+    const make = (delegate) => ImageSegmenter.createFromOptions(files, { baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: "VIDEO", outputConfidenceMasks: true, outputCategoryMask: false });
+    let forced = null;
+    try {
+      forced = localStorage.getItem("meet:blur-delegate");
+    } catch {
+    }
+    if (forced === "CPU" || cpuOnly) return { seg: await make("CPU"), delegate: "CPU" };
+    try {
+      return { seg: await make("GPU"), delegate: "GPU" };
+    } catch {
+      return { seg: await make("CPU"), delegate: "CPU" };
+    }
+  })();
+  return segP;
+}
+var FPS2, segP, Blur;
+var init_blur = __esm({
+  "public/app/blur.mjs"() {
+    init_api();
+    FPS2 = 24;
+    segP = null;
+    Blur = class _Blur {
+      static async create(camera, { amount = 24 } = {}) {
+        const b = new _Blur(camera, amount);
+        await b.start();
+        return b;
+      }
+      constructor(camera, amount) {
+        this.camera = camera;
+        this.amount = amount;
+        this.stats = { frames: 0, masks: 0, ms: 0, delegate: null };
+      }
+      async start() {
+        const s = this.camera.getSettings();
+        const w = s.width || 640, h = s.height || 360;
+        this.video = Object.assign(document.createElement("video"), { muted: true, playsInline: true, autoplay: true });
+        this.video.srcObject = new MediaStream([this.camera]);
+        await this.video.play().catch(() => {
+        });
+        this.out = Object.assign(document.createElement("canvas"), { width: w, height: h });
+        this.person = Object.assign(document.createElement("canvas"), { width: w, height: h });
+        this.maskC = document.createElement("canvas");
+        this.small = Object.assign(document.createElement("canvas"), { width: 256, height: Math.round(256 * h / w) });
+        this.sg = this.small.getContext("2d");
+        this.bg = Object.assign(document.createElement("canvas"), { width: 320, height: Math.round(320 * h / w) });
+        this.bgg = this.bg.getContext("2d");
+        this.g = this.out.getContext("2d");
+        this.pg = this.person.getContext("2d");
+        this.mg = this.maskC.getContext("2d", { willReadFrequently: true });
+        const { seg, delegate } = await segmenter();
+        this.seg = seg;
+        this.stats.delegate = delegate;
+        this.track = this.out.captureStream(FPS2).getVideoTracks()[0];
+        this.track.contentHint = "motion";
+        this.timer = setInterval(() => this.frame(), 1e3 / FPS2);
+      }
+      frame() {
+        const v = this.video;
+        if (!v.videoWidth || this.busy) return;
+        const { width: W2, height: H2 } = this.out;
+        this.busy = true;
+        const t0 = performance.now();
+        try {
+          this.sg.drawImage(v, 0, 0, this.small.width, this.small.height);
+          this.seg.segmentForVideo(this.small, t0, (r) => {
+            const m = r.confidenceMasks?.[0];
+            if (!m) return;
+            if (this.maskC.width !== m.width || this.maskC.height !== m.height) {
+              this.maskC.width = m.width;
+              this.maskC.height = m.height;
+              this.img = this.mg.createImageData(m.width, m.height);
+            }
+            const p = m.getAsFloat32Array();
+            const d = this.img.data;
+            for (let i = 0; i < p.length; i++) {
+              d[i * 4 + 3] = Math.min(255, Math.max(0, (p[i] - 0.25) * 2 * 255));
+            }
+            this.mg.putImageData(this.img, 0, 0);
+            this.stats.masks++;
+          });
+        } catch (e) {
+          this.error = e.message;
+        }
+        this.bgg.filter = `blur(${Math.max(2, Math.round(this.amount * this.bg.width / W2))}px)`;
+        this.bgg.drawImage(v, 0, 0, this.bg.width, this.bg.height);
+        this.g.imageSmoothingQuality = "high";
+        this.g.drawImage(this.bg, 0, 0, W2, H2);
+        if (this.stats.masks) {
+          this.pg.globalCompositeOperation = "copy";
+          this.pg.drawImage(v, 0, 0, W2, H2);
+          this.pg.globalCompositeOperation = "destination-in";
+          this.pg.drawImage(this.maskC, 0, 0, W2, H2);
+          this.g.drawImage(this.person, 0, 0);
+        }
+        this.stats.frames++;
+        this.stats.ms += performance.now() - t0;
+        this.busy = false;
+        if (this.stats.frames === 12 && this.stats.delegate === "GPU" && this.stats.ms / 12 > 60 && !this.switching) {
+          this.switching = true;
+          segmenter(true).then(({ seg, delegate }) => {
+            this.seg = seg;
+            this.stats = { frames: 0, masks: 0, ms: 0, delegate, switched: true };
+          }).catch(() => {
+          });
+        }
+      }
+      stop() {
+        clearInterval(this.timer);
+        this.track?.stop();
+        if (this.video) this.video.srcObject = null;
+      }
+    };
+  }
+});
+
 // public/app/call.mjs
 var call_exports = {};
 __export(call_exports, {
@@ -1802,7 +1930,7 @@ function modeLabel(plan, engine) {
   if (plan.mode === "livekit") return "Media server";
   return "";
 }
-var SPEAK_LEVEL, VIEWER_DELAY_MS, Call, linkify;
+var bgPref, SPEAK_LEVEL, VIEWER_DELAY_MS, Call, linkify;
 var init_call = __esm({
   "public/app/call.mjs"() {
     init_api();
@@ -1811,6 +1939,18 @@ var init_call = __esm({
     init_notes();
     init_record();
     init_board();
+    bgPref = { get: () => {
+      try {
+        return localStorage.getItem("meet:background") || "none";
+      } catch {
+        return "none";
+      }
+    }, set: (v) => {
+      try {
+        localStorage.setItem("meet:background", v);
+      } catch {
+      }
+    } };
     SPEAK_LEVEL = 0.03;
     VIEWER_DELAY_MS = 2e3;
     Call = class {
@@ -1865,6 +2005,8 @@ var init_call = __esm({
         await this.recording.load();
         this.whiteboard = new Whiteboard(this);
         await this.whiteboard.load();
+        if (bgPref.get() === "blur" && this.local.cam) this.setBackground("blur", true).catch(() => {
+        });
         this.levelT = setInterval(() => this.pollLevels(), 250);
         this.statT = setInterval(() => this.refreshTrouble(), 3e3);
         window.addEventListener("pagehide", this.onHide = () => {
@@ -1878,6 +2020,7 @@ var init_call = __esm({
         this.notes?.stop();
         this.recording?.stop();
         this.whiteboard?.stop();
+        this.blur?.stop();
         if (this.onHide) window.removeEventListener("pagehide", this.onHide);
         this.ro?.disconnect();
         await this.engine?.stop().catch(() => {
@@ -1930,7 +2073,7 @@ var init_call = __esm({
           const cbs = {
             signal: this.signal,
             me: this.peer,
-            local: { ...this.local, mic: this.audioOn ? this.local.mic : this.local.mic },
+            local: { ...this.local, cam: this.camTrack() },
             ice: this.media.ice_servers,
             e2eeKey: this.media.e2ee_key,
             canPublish,
@@ -2156,6 +2299,7 @@ var init_call = __esm({
           this.layout = b.layout;
           this.render();
         }
+        if (b.background && b.background !== this.bg) this.setBackground(b.background, true).catch((e) => toast(e.message));
       }
       // ------------------------------------------------------------ my media
       async setMic(on, fromServer = false) {
@@ -2186,14 +2330,45 @@ var init_call = __esm({
             return;
           }
           await this.engine?.setTrack("cam", this.local.cam);
+          if (this.bg === "blur") await this.setBackground("blur", true).catch(() => {
+          });
         }
         if (!on && this.local.cam) {
+          this.blur?.stop();
+          this.blur = null;
           this.local.cam.stop();
           this.local.cam = null;
           await this.engine?.setTrack("cam", null);
         }
         this.videoOn = on;
         if (!fromServer) await callTool("meet.set_my_media", { meeting: this.meeting.id, video: on }).catch((e) => toast(e.message));
+        this.render();
+      }
+      // The camera as others see it: blurred when background blur is on.
+      camTrack() {
+        return this.blur?.track ?? this.local.cam;
+      }
+      async setBackground(mode, fromServer = false) {
+        this.bg = mode;
+        bgPref.set(mode);
+        if (mode === "blur" && this.local.cam && !this.blur) {
+          const { Blur: Blur2 } = await Promise.resolve().then(() => (init_blur(), blur_exports));
+          try {
+            this.blur = await Blur2.create(this.local.cam);
+          } catch (e) {
+            this.bg = "none";
+            bgPref.set("none");
+            throw new Error(`Background blur could not start on this device (${e.message}).`);
+          }
+          await this.engine?.setTrack("cam", this.blur.track);
+        }
+        if (mode !== "blur" && this.blur) {
+          const b = this.blur;
+          this.blur = null;
+          await this.engine?.setTrack("cam", this.local.cam);
+          b.stop();
+        }
+        if (!fromServer) await callTool("meet.set_background", { meeting: this.meeting.id, background: mode }).catch((e) => toast(e.message));
         this.render();
       }
       // Choosing a screen is the browser's picker, which only the person can use (ROADMAP 3.3).
@@ -2337,7 +2512,7 @@ var init_call = __esm({
         const list = [];
         for (const p of inCall) {
           const mine = p.id === this.me.id;
-          const cam = mine ? this.videoOn ? this.local.cam : null : p.video_on ? this.remoteFor(p.id, "cam") : null;
+          const cam = mine ? this.videoOn ? this.camTrack() : null : p.video_on ? this.remoteFor(p.id, "cam") : null;
           if (this.meeting.kind === "webinar" && p.role === "viewer") continue;
           list.push({ key: `${p.id}:cam`, pid: p.id, p, track: cam, mine, audio: mine ? this.audioOn : p.audio_on });
           const scr = mine ? this.local.screen : p.sharing ? this.remoteFor(p.id, "screen") : null;
@@ -2743,6 +2918,7 @@ var init_call = __esm({
           item("layout", "meet.set_layout", this.layout === "grid" ? "Speaker view" : "Grid view", this.layout === "grid" ? "speaker" : "grid"),
           ...(this.recording?.moreItems() ?? []).map((x) => item(...x)),
           ...(this.whiteboard?.moreItems() ?? []).map((x) => item(...x)),
+          ...this.canPublish() && this.local.cam && this.videoOn ? [this.bg === "blur" ? item("bg-none", "meet.set_background", "Stop blurring my background", "blur") : item("bg-blur", "meet.set_background", "Blur my background", "blur")] : [],
           item("captions", "none", this.notes?.captions ? "Hide captions" : "Show captions", "captions", "shows or hides captions on this screen only"),
           item("info", "none", "Call details", "info", "opens call details")
         ].join("");
@@ -2768,6 +2944,10 @@ var init_call = __esm({
           if (a === "info") return this.openPanel("info");
           if (a.startsWith("rec-")) await this.recording?.onAct(a);
           if (a.startsWith("wb-")) await this.whiteboard?.onAct(a);
+          if (a === "bg-blur" || a === "bg-none") {
+            if (a === "bg-blur") toast("Starting background blur\u2026");
+            await this.setBackground(a === "bg-blur" ? "blur" : "none");
+          }
         } catch (err) {
           toast(err.message);
         }

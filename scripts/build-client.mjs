@@ -11,6 +11,7 @@ const targets = [
   { entry: 'client/mediasoup-client.mjs', file: 'mediasoup-client.js' },
   { entry: 'client/livekit-client.mjs', file: 'livekit-client.js' },
   { entry: 'client/whisper-worker.mjs', file: 'whisper-worker.js' },
+  { entry: 'client/blur.mjs', file: 'blur.js' },
 ];
 if (ifNeeded && [...targets.map((t) => t.file), 'livekit-e2ee-worker.mjs', 'wb/whiteboard.js'].every((f) => fs.existsSync(path.join(out, f)))) process.exit(0);
 let esbuild;

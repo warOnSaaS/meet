@@ -11,6 +11,8 @@ import { Notes } from './notes.mjs';
 import { Recording } from './record.mjs';
 import { Whiteboard } from './board.mjs';
 
+const bgPref = { get: () => { try { return localStorage.getItem('meet:background') || 'none'; } catch { return 'none'; } }, set: (v) => { try { localStorage.setItem('meet:background', v); } catch {} } };
+
 const SPEAK_LEVEL = 0.03;
 // Webinar viewers hear and see speakers this much later (a receive buffer, 1 to 3 s as decided): smoother
 // playback, and room for the longer paths of a broadcast tree.
@@ -63,6 +65,7 @@ export class Call {
     await this.recording.load();
     this.whiteboard = new Whiteboard(this);
     await this.whiteboard.load();
+    if (bgPref.get() === 'blur' && this.local.cam) this.setBackground('blur', true).catch(() => {});
     this.levelT = setInterval(() => this.pollLevels(), 250);
     this.statT = setInterval(() => this.refreshTrouble(), 3000);
     window.addEventListener('pagehide', this.onHide = () => { navigator.sendBeacon?.(`${getMediaBase()}/leave?token=` + encodeURIComponent(j.token)); });
@@ -74,6 +77,7 @@ export class Call {
     this.notes?.stop();
     this.recording?.stop();
     this.whiteboard?.stop();
+    this.blur?.stop();
     if (this.onHide) window.removeEventListener('pagehide', this.onHide);
     this.ro?.disconnect();
     await this.engine?.stop().catch(() => {});
@@ -123,7 +127,7 @@ export class Call {
     }
     if (want && !this.engine) {
       const cbs = {
-        signal: this.signal, me: this.peer, local: { ...this.local, mic: this.audioOn ? this.local.mic : this.local.mic }, ice: this.media.ice_servers,
+        signal: this.signal, me: this.peer, local: { ...this.local, cam: this.camTrack() }, ice: this.media.ice_servers,
         e2eeKey: this.media.e2ee_key, canPublish,
         onTrack: (x) => this.onTrack(x), onTrackGone: (x) => this.trackGone(`${x.peer}:${x.source}`),
         onPeerState: (peer, s, reason) => { if (s === 'failed') this.peerTrouble.set(peer, reason); else this.peerTrouble.delete(peer); this.render(); },
@@ -289,6 +293,7 @@ export class Call {
     if (b.request?.kind === 'screen_share') { this.requests = [...this.requests.filter((r) => r.id !== b.request.id), b.request]; this.render(); }
     if (b.stop_share && this.local.screen) this.stopShare(true);
     if (b.layout && b.layout !== this.layout) { this.layout = b.layout; this.render(); }
+    if (b.background && b.background !== this.bg) this.setBackground(b.background, true).catch((e) => toast(e.message));
   }
 
   // ------------------------------------------------------------ my media
@@ -310,10 +315,28 @@ export class Call {
       try { const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } } }); this.local.cam = s.getVideoTracks()[0]; }
       catch { toast('The browser blocked the camera, or it is busy.'); return; }
       await this.engine?.setTrack('cam', this.local.cam);
+      if (this.bg === 'blur') await this.setBackground('blur', true).catch(() => {});
     }
-    if (!on && this.local.cam) { this.local.cam.stop(); this.local.cam = null; await this.engine?.setTrack('cam', null); }
+    if (!on && this.local.cam) { this.blur?.stop(); this.blur = null; this.local.cam.stop(); this.local.cam = null; await this.engine?.setTrack('cam', null); }
     this.videoOn = on;
     if (!fromServer) await callTool('meet.set_my_media', { meeting: this.meeting.id, video: on }).catch((e) => toast(e.message));
+    this.render();
+  }
+
+  // The camera as others see it: blurred when background blur is on.
+  camTrack() { return this.blur?.track ?? this.local.cam; }
+
+  async setBackground(mode, fromServer = false) {
+    this.bg = mode;
+    bgPref.set(mode);
+    if (mode === 'blur' && this.local.cam && !this.blur) {
+      const { Blur } = await import('./blur.mjs');
+      try { this.blur = await Blur.create(this.local.cam); }
+      catch (e) { this.bg = 'none'; bgPref.set('none'); throw new Error(`Background blur could not start on this device (${e.message}).`); }
+      await this.engine?.setTrack('cam', this.blur.track);
+    }
+    if (mode !== 'blur' && this.blur) { const b = this.blur; this.blur = null; await this.engine?.setTrack('cam', this.local.cam); b.stop(); }
+    if (!fromServer) await callTool('meet.set_background', { meeting: this.meeting.id, background: mode }).catch((e) => toast(e.message));
     this.render();
   }
 
@@ -451,7 +474,7 @@ export class Call {
     const list = [];
     for (const p of inCall) {
       const mine = p.id === this.me.id;
-      const cam = mine ? (this.videoOn ? this.local.cam : null) : (p.video_on ? this.remoteFor(p.id, 'cam') : null);
+      const cam = mine ? (this.videoOn ? this.camTrack() : null) : (p.video_on ? this.remoteFor(p.id, 'cam') : null);
       if (this.meeting.kind === 'webinar' && p.role === 'viewer') continue;
       list.push({ key: `${p.id}:cam`, pid: p.id, p, track: cam, mine, audio: mine ? this.audioOn : p.audio_on });
       const scr = mine ? this.local.screen : (p.sharing ? this.remoteFor(p.id, 'screen') : null);
@@ -783,6 +806,7 @@ export class Call {
       item('layout', 'meet.set_layout', this.layout === 'grid' ? 'Speaker view' : 'Grid view', this.layout === 'grid' ? 'speaker' : 'grid'),
       ...(this.recording?.moreItems() ?? []).map((x) => item(...x)),
       ...(this.whiteboard?.moreItems() ?? []).map((x) => item(...x)),
+      ...(this.canPublish() && this.local.cam && this.videoOn ? [this.bg === 'blur' ? item('bg-none', 'meet.set_background', 'Stop blurring my background', 'blur') : item('bg-blur', 'meet.set_background', 'Blur my background', 'blur')] : []),
       item('captions', 'none', this.notes?.captions ? 'Hide captions' : 'Show captions', 'captions', 'shows or hides captions on this screen only'),
       item('info', 'none', 'Call details', 'info', 'opens call details'),
     ].join('');
@@ -806,6 +830,7 @@ export class Call {
       if (a === 'info') return this.openPanel('info');
       if (a.startsWith('rec-')) await this.recording?.onAct(a);
       if (a.startsWith('wb-')) await this.whiteboard?.onAct(a);
+      if (a === 'bg-blur' || a === 'bg-none') { if (a === 'bg-blur') toast('Starting background blur…'); await this.setBackground(a === 'bg-blur' ? 'blur' : 'none'); }
     } catch (err) { toast(err.message); }
   }
 

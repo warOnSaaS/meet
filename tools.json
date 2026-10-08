@@ -555,6 +555,42 @@
       "test": "test/unit/tools.test.mjs"
     },
     {
+      "name": "meet.set_background",
+      "title": "Blur my background",
+      "description": "Blur the background behind you on your own camera, or stop. Done on your device (MediaPipe selfie segmentation); nobody else's camera can be changed.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "background"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "none",
+              "blur"
+            ],
+            "description": "blur, or none"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.participant.media"
+      ],
+      "test": "test/unit/tools.test.mjs"
+    },
+    {
       "name": "meet.mute_participant",
       "title": "Mute someone",
       "description": "Host: mute someone's microphone, or turn off their camera. Nobody can turn another person's mic or camera on; you can only ask.",
