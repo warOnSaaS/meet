@@ -32,6 +32,7 @@ Or without Docker: `npm install && npm start` (Node 22 or newer). It uses SQLite
 | Host controls | Waiting room, let in or turn away, mute someone or everyone, make co-hosts, ask someone to share, remove, lock, end for everyone. |
 | Webinars | A few speakers, many viewers. Viewers send nothing and are not asked for a camera; they raise a hand, and the host lets them speak (only then does their browser ask for the microphone and camera). Viewers see and hear speakers 1 to 3 s late, which smooths playback and leaves room for longer paths between computers; speakers talk with each other live. |
 | Agents | Every button is also a tool an agent can call, over MCP at `/mcp` or REST at `/api/tools/<name>`. A person still has to allow the camera and choose what screen to share. |
+| AI agent in the call | Designed, not built: a server-side participant that holds the meeting key only after a host lets it in, and is shown to everyone. [docs/AGENT-PARTICIPANT.md](docs/AGENT-PARTICIPANT.md). |
 | Other apps | `meet.huddle` opens (or finds) the live room for a record, such as a Chat channel, with no waiting room. Chat huddles use it. |
 | Export | `meet.export` gives you every meeting you host, who joined and the chat, as JSON. |
 | Check | `meet doctor` (and the `meet.doctor` tool) checks UDP, TLS, TURN and the media server, and says what to fix. |

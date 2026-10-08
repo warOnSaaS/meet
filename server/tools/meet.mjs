@@ -631,14 +631,13 @@ export const tools = [
   ...recording.tools,
   ...board.tools,
 
-  // ---- planned (v1). Listed so agents know they are coming; calling one returns not_built. ----
-  ...[
-    ['meet.join_as_agent', 'none', 'Have an AI agent join the call as a participant that listens and speaks. Not built yet.'],
-  ].map(([name, confirm, description]) => ({
-    name, scope: name.includes('get_') ? 'read' : 'write', confirm, planned: 'v1', events: [], description,
-    input: { type: 'object', required: ['meeting'], properties: { meeting: MEETING } },
-    async handler() { fail('not_built', `${name} is planned for v1 and not built yet. See docs/RECORDING-CONSENT.md.`, 501); },
-  })),
+  // ---- designed, not built (docs/AGENT-PARTICIPANT.md). Listed so agents know it is coming. ----
+  {
+    name: 'meet.join_as_agent', scope: 'write', confirm: 'human', events: [], planned: 'v1', test: 'test/unit/tools.test.mjs',
+    description: 'Send an AI agent into the call as a participant that listens and, if the host allows, speaks. It waits in the waiting room with an Agent badge until a host lets it in, and everyone sees it while it is there. Designed, not built yet: see docs/AGENT-PARTICIPANT.md.',
+    input: { type: 'object', required: ['meeting'], properties: { meeting: MEETING, agent: str('Which saved agent'), purpose: str('One line shown to everyone: why it is here'), listen: bool('Transcribe the people who agreed to notes (default on)'), speak: bool('Allowed to speak when asked (default off)') } },
+    async handler() { fail('not_built', 'meet.join_as_agent is designed but not built yet. See docs/AGENT-PARTICIPANT.md in the Meetings repo.', 501); },
+  },
 ];
 
 // Titles, as the button or menu item says it (sentence case).

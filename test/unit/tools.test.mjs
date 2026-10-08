@@ -33,7 +33,7 @@ test('MCP lists every tool and calls the same handlers as REST', async () => {
   assert.equal(made.result.structuredContent.title, 'Made over MCP');
   const got = await api(srv.base, 'meet.get', { meeting: made.result.structuredContent.id });
   assert.equal(got.title, 'Made over MCP');
-  const planned = await rpc('tools/call', { name: 'meet.start_recording', arguments: { meeting: got.id } });
+  const planned = await rpc('tools/call', { name: 'meet.join_as_agent', arguments: { meeting: got.id } });
   assert.equal(planned.result.isError, true);
 });
 

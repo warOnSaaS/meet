@@ -2155,7 +2155,7 @@
     {
       "name": "meet.join_as_agent",
       "title": "Join as an agent",
-      "description": "Have an AI agent join the call as a participant that listens and speaks. Not built yet. Planned for v1.",
+      "description": "Send an AI agent into the call as a participant that listens and, if the host allows, speaks. It waits in the waiting room with an Agent badge until a host lets it in, and everyone sees it while it is there. Designed, not built yet: see docs/AGENT-PARTICIPANT.md. Planned for v1.",
       "input": {
         "additionalProperties": false,
         "type": "object",
@@ -2166,6 +2166,22 @@
           "meeting": {
             "type": "string",
             "description": "Meeting id, or the token from its join link"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Which saved agent"
+          },
+          "purpose": {
+            "type": "string",
+            "description": "One line shown to everyone: why it is here"
+          },
+          "listen": {
+            "type": "boolean",
+            "description": "Transcribe the people who agreed to notes (default on)"
+          },
+          "speak": {
+            "type": "boolean",
+            "description": "Allowed to speak when asked (default off)"
           }
         }
       },
@@ -2173,7 +2189,7 @@
         "type": "object"
       },
       "scope": "write",
-      "confirm": "none",
+      "confirm": "human",
       "emits": [],
       "test": "test/unit/tools.test.mjs"
     }
