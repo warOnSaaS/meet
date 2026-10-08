@@ -16,7 +16,7 @@ import { handleMcp } from './mcp.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.txt': 'text/plain; charset=utf-8', '.ico': 'image/x-icon' };
+const TYPES = { '.wasm': 'application/wasm', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.txt': 'text/plain; charset=utf-8', '.ico': 'image/x-icon' };
 
 export function createApp({ db, config }) {
   const room = createRoom({ db, config });
@@ -104,6 +104,7 @@ export function createApp({ db, config }) {
       const token = sign(config.secret, { k: 'peer', peer, mid: meetingId, exp: Date.now() + 24 * 3600e3 });
       return json(res, 200, { ok: true, peer, token, cursor, plan: await room.currentPlan(meetingId), ws: !config.serverless, room: m.room_name });
     }
+    if (p.startsWith('/media/assets/') && req.method === 'GET') return serveAsset(req, res, p.slice('/media/assets/'.length));
     const peer = await peerFrom(req, url);
     if (!peer) return json(res, 401, { ok: false, error: { code: 'gone', message: 'This connection to the call has ended. Rejoin.' } });
     if (p === '/media/signal' && req.method === 'GET') {
@@ -159,6 +160,12 @@ export function createApp({ db, config }) {
   }
 
   // ---------- static ----------
+
+  // Browser libraries built into public/vendor (scripts/build-client.mjs). Immutable per deploy name.
+  function serveAsset(req, res, name) {
+    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) return json(res, 404, { ok: false });
+    return serveStatic(req, res, `/vendor/${name}`);
+  }
 
   function serveStatic(req, res, p) {
     let file;

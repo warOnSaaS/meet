@@ -41,6 +41,12 @@
     "mediasoup": "^3.28.0"
   },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "@excalidraw/excalidraw": "^0.18.1",
+    "@huggingface/transformers": "^3.8.1",
+    "@mediapipe/tasks-vision": "^1.1.0",
+    "playwright": "1.63.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "yjs": "^13.6.33"
   }
 }

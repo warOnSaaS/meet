@@ -123,6 +123,44 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
 .meet-hosts li{display:flex;gap:6px;align-items:center}
 .meet-hostcmd{margin-top:12px;font-size:13.5px}
 
+
+/* ---------- notes, captions, the More menu ---------- */
+.meet-call-tr{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.meet-notes-on .ui-dot,.meet-rec-on .ui-dot{animation:meet-blink 1.6s ease-in-out infinite}
+@keyframes meet-blink{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.meet-notes-on .ui-dot,.meet-rec-on .ui-dot{animation:none}}
+.meet-dot.is-rec{min-width:9px;width:9px;height:9px;padding:0;top:2px;right:2px;background:var(--ui-bad)}
+.meet-cap{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none;z-index:4;padding:0 12px}
+.meet-cap:empty{display:none}
+.meet-captions{max-width:min(760px,100%);display:grid;gap:2px;padding:8px 14px;border-radius:var(--ui-radius);background:color-mix(in srgb,#000 72%,transparent);color:#fff;font-size:15px;line-height:1.45}
+.meet-captions p{margin:0}
+.meet-captions b{font-weight:var(--ui-weight-strong,600);margin-right:6px;color:color-mix(in srgb,#fff 78%,var(--ui-accent))}
+.meet-stage.has-big .meet-cap{bottom:calc(12px + 120px)}
+.meet-more{position:fixed;inset:0;z-index:30}
+.meet-more-in{position:absolute;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));min-width:220px;display:grid;padding:6px;background:var(--ui-surface);border:1px solid var(--ui-line-2);border-radius:var(--ui-radius-lg);box-shadow:var(--ui-shadow-lg)}
+.meet-more-i{display:flex;align-items:center;gap:10px;padding:9px 10px;font:inherit;font-size:14px;color:var(--ui-ink);background:none;border:0;border-radius:var(--ui-radius-sm);cursor:pointer;text-align:left}
+.meet-more-i:hover,.meet-more-i:focus-visible{background:var(--ui-hover)}
+.meet-more-i svg{color:var(--ui-ink-2);flex:none}
+.meet-notes-h{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-bottom:10px}
+.meet-notes-h .ui-dot{margin-top:6px}
+.meet-notes-me{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:14px}
+.meet-nrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px;font-size:14px}
+.meet-transcript{list-style:none;margin:0;padding:0;display:grid;gap:10px;font-size:14px}
+.meet-transcript li{display:grid;gap:1px}
+.meet-tr-h{font-size:12.5px}
+.meet-notes-b{font-size:14px;line-height:1.5;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius);padding:10px 12px;margin-bottom:8px}
+.meet-notes-b p{margin:0 0 6px}
+.meet-notes-b ul{margin:0 0 8px;padding-left:18px}
+.meet-send{display:grid;gap:6px}
+.meet-send form{display:flex;gap:6px}
+.meet-send .ui-input{min-width:0;flex:1}
+.meet-send p{margin:0}
+.meet-dlg p{margin:0 0 10px;line-height:1.5}
+.meet-join-notice{margin-bottom:12px}
+.meet-settings{margin-top:12px}
+.meet-settings summary{cursor:pointer;margin:0}
+.meet-settings form{margin-top:12px}
+
 /* ---------- phone ---------- */
 @media (max-width:760px){
   .meet-pre{grid-template-columns:1fr}
@@ -133,7 +171,10 @@ body.meet:has(.meet-call) .ui-toast{bottom:84px}
   .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}
   .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}
   .meet-bar button{width:38px;height:38px;flex:none}
-  .meet-bar [data-act=info]{display:none}
+  .meet-bar [data-act=info],.meet-bar .meet-hide-sm{display:none}
+  .meet-more-in{left:8px;right:8px}
+  .meet-cap{bottom:8px}
+  .meet-captions{font-size:14px}
   .meet-bar-sep{display:none}
   .meet-bar button.is-leave{width:auto;padding:0 14px}
   .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}

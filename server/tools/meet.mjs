@@ -4,6 +4,7 @@ import { id, secretToken, sign, verify } from '../auth.mjs';
 import { iceServers } from '../config.mjs';
 import { describePlan } from '../room/plan.mjs';
 import { runDoctor } from '../doctor.mjs';
+import { notesTools, NOTES_TITLES } from './notes.mjs';
 
 export class ToolError extends Error {
   constructor(code, message, status = 400) { super(message); this.code = code; this.status = status; }
@@ -54,7 +55,7 @@ function meetingOut(ctx, m, extra = {}) {
     id: m.id, title: m.title, kind: m.kind, status: m.status,
     starts_at: m.starts_at ? new Date(Number(m.starts_at)).toISOString() : null,
     duration_min: m.duration_min, waiting_room: !!m.waiting_room, locked: !!m.locked, media_pref: m.media_pref,
-    linked_record: m.linked_record, join_url: joinUrl(ctx, m), ...extra,
+    linked_record: m.linked_record, join_url: joinUrl(ctx, m), notes_on: !!m.notes_on, ...extra,
   };
 }
 const partOut = (p, inCall) => p && ({
@@ -117,6 +118,10 @@ async function targetParticipant(ctx, m, pid) {
   if (!p) fail('not_found', 'No such participant in this meeting.', 404);
   return p;
 }
+
+// The helpers the other tool files (notes, recording, whiteboard) build on.
+const H = { fail, str, bool, MEETING, PARTICIPANT, meetingRow, me, isOwner, requireHost, requireIn, requireMember, joinUrl, now, id, sign, verify };
+const notes = notesTools(H);
 
 // ---------- the tools ----------
 
@@ -284,7 +289,10 @@ export const tools = [
       await ctx.db.run("UPDATE meeting_participants SET status = 'left', left_at = ? WHERE meeting_id = ? AND status IN ('admitted', 'waiting')", [now(), m.id]);
       await ctx.room.broadcast(m.id, 'ended', { by: (await me(ctx, m))?.display_name ?? 'the host' });
       await ctx.db.run('DELETE FROM meet_peers WHERE meeting_id = ?', [m.id]);
-      return { ended: m.id };
+      // Notes taken in this meeting are written and sent where the host chose. A failure here never stops the end.
+      let notesOut = null;
+      try { notesOut = await notes.onEnded(ctx, { ...m, ended_at: now() }); } catch (e) { notesOut = { written: false, error: e.message }; }
+      return { ended: m.id, ...(notesOut ? { notes: notesOut } : {}) };
     },
   },
   {
@@ -569,7 +577,7 @@ export const tools = [
   },
   {
     name: 'meet.export', scope: 'read', confirm: 'none', events: [],
-    description: 'Export everything you host: meetings, who joined, and chat, as JSON.',
+    description: 'Export everything you host: meetings, who joined, chat, transcripts, notes and consent records, as JSON.',
     input: { type: 'object', properties: {} },
     async handler(ctx) {
       const u = requireMember(ctx);
@@ -577,7 +585,14 @@ export const tools = [
       const out = [];
       for (const m of ms) {
         const { e2ee_key: _k, ...rest } = m;
-        out.push({ ...rest, participants: await ctx.db.all('SELECT * FROM meeting_participants WHERE meeting_id = ?', [m.id]), chat: await ctx.db.all('SELECT * FROM meeting_chat WHERE meeting_id = ? ORDER BY id', [m.id]) });
+        out.push({
+          ...rest,
+          participants: await ctx.db.all('SELECT * FROM meeting_participants WHERE meeting_id = ?', [m.id]),
+          chat: await ctx.db.all('SELECT * FROM meeting_chat WHERE meeting_id = ? ORDER BY id', [m.id]),
+          transcript: await ctx.db.all('SELECT * FROM meet_segments WHERE meeting_id = ? ORDER BY start_at', [m.id]),
+          notes: await ctx.db.get('SELECT * FROM meeting_notes WHERE meeting_id = ?', [m.id]),
+          notes_consents: await ctx.db.all('SELECT * FROM meet_notes_consents WHERE meeting_id = ?', [m.id]),
+        });
       }
       return { exported_at: new Date().toISOString(), meetings: out };
     },
@@ -592,12 +607,12 @@ export const tools = [
     },
   },
 
+  ...notes.tools,
+
   // ---- planned (v1). Listed so agents know they are coming; calling one returns not_built. ----
   ...[
     ['meet.start_recording', 'human', 'Ask everyone in the call to agree to recording. Recording starts only after the notice is shown and spoken to everyone, and each person\'s answer is recorded (ROADMAP F11). Not built yet.'],
     ['meet.stop_recording', 'none', 'Stop a recording. Not built yet.'],
-    ['meet.get_transcript', 'none', 'Read the transcript of a recorded meeting. Not built yet.'],
-    ['meet.summarise', 'none', 'Write a summary, decisions and action items from the transcript, to the CRM record or the board. Not built yet.'],
     ['meet.join_as_agent', 'none', 'Have an AI agent join the call as a participant that listens and speaks. Not built yet.'],
   ].map(([name, confirm, description]) => ({
     name, scope: name.includes('get_') ? 'read' : 'write', confirm, planned: 'v1', events: [], description,
@@ -620,6 +635,7 @@ const TITLES = {
   'meet.doctor': 'Check calls can connect', 'meet.start_recording': 'Start recording', 'meet.stop_recording': 'Stop recording',
   'meet.get_transcript': 'Get the transcript', 'meet.summarise': 'Write meeting notes', 'meet.join_as_agent': 'Join as an agent',
 };
+Object.assign(TITLES, NOTES_TITLES);
 for (const t of tools) t.title = TITLES[t.name] ?? t.name;
 
 export const byName = new Map(tools.map((t) => [t.name, t]));
@@ -636,7 +652,7 @@ export function catalogue() {
       input: { additionalProperties: false, ...t.input },
       output: t.output ?? { type: 'object' },
       scope: t.scope, confirm: t.confirm, emits: t.events ?? [],
-      test: t.planned ? 'test/unit/tools.test.mjs' : 'test/unit/tools.test.mjs',
+      test: t.test ?? 'test/unit/tools.test.mjs',
       ...(['meet.get', 'meet.join', 'meet.whoami'].includes(t.name) ? { public: true } : {}),
     })),
   };

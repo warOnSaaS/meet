@@ -1016,7 +1016,7 @@
     {
       "name": "meet.export",
       "title": "Export everything",
-      "description": "Export everything you host: meetings, who joined, and chat, as JSON.",
+      "description": "Export everything you host: meetings, who joined, chat, transcripts, notes and consent records, as JSON.",
       "input": {
         "additionalProperties": false,
         "type": "object",
@@ -1048,6 +1048,590 @@
       "test": "test/unit/tools.test.mjs"
     },
     {
+      "name": "meet.start_notes",
+      "title": "Turn notes on",
+      "description": "Turn on AI notes. Everyone in the call sees and hears a notice, and each person's own device writes down only what that person says, once they agree. Words are kept with the meeting while notes are on. Host or co-host only.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "send_to": {
+            "type": "object",
+            "description": "Where the notes go when the meeting ends (each is optional)",
+            "properties": {
+              "crm": {
+                "type": "string",
+                "description": "A CRM record: crm:deal:<id or name>, crm:contact:..., crm:org:...; or \"linked\" for the meeting's own record"
+              },
+              "board": {
+                "type": "string",
+                "description": "The board client to add action items to"
+              },
+              "chat": {
+                "type": "string",
+                "description": "A Chat channel to post the notes in"
+              },
+              "email": {
+                "type": "boolean",
+                "description": "Email the notes to everyone in the meeting who is on the team"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "human",
+      "emits": [
+        "meet.notes.started"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.stop_notes",
+      "title": "Turn notes off",
+      "description": "Turn AI notes off. Nothing more is written down; what was written stays with the meeting until the host deletes it.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.stopped"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.answer_notes",
+      "title": "Answer the notes notice",
+      "description": "Your answer to the notes notice: include your voice in the notes, or leave it out. Change it any time. Also says how your device writes down your words (engine), so the call can find a helper when it cannot.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "include"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "include": {
+            "type": "boolean",
+            "description": "true: your words go in the notes. false: your microphone is never written down."
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "whisper-webgpu",
+              "whisper-wasm",
+              "web-speech",
+              "none"
+            ],
+            "description": "How your device transcribes: whisper-webgpu, whisper-wasm (both on this device), web-speech (the browser's speech service), none (cannot)"
+          },
+          "shown_at": {
+            "type": "string",
+            "description": "When you saw the notice, ISO 8601 (defaults to now)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.consent"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.notes_status",
+      "title": "Notes status",
+      "description": "Whether notes are on, who turned them on, each person's answer and how their words are written down (their own device, a helper in the call, or the server), and which model writes the notes.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.add_transcript",
+      "title": "Add to the transcript",
+      "description": "Add lines to the transcript: what you said, written down by your own device (or, as a helper, what someone you write for said). Only while notes are on and only for people who agreed.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "segments"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "segments": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": [
+                "text",
+                "start_at"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Your id for this line, so sending it twice keeps one"
+                },
+                "participant": {
+                  "type": "string",
+                  "description": "Whose words (defaults to you)"
+                },
+                "start_at": {
+                  "type": "string",
+                  "description": "When they started speaking, ISO 8601 or milliseconds"
+                },
+                "end_at": {
+                  "type": "string",
+                  "description": "When they stopped"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "What they said"
+                },
+                "engine": {
+                  "type": "string",
+                  "enum": [
+                    "whisper-webgpu",
+                    "whisper-wasm",
+                    "web-speech",
+                    "none"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.transcript.added"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.transcribe_audio",
+      "title": "Transcribe a clip on the server",
+      "description": "For a device that cannot transcribe: send a short clip of your own speech (WAV, under 30 s) and the team's speech service writes it down. Only when the team set one up, and only while notes are on and you agreed.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting",
+          "audio_base64",
+          "start_at"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "audio_base64": {
+            "type": "string",
+            "description": "The clip, base64"
+          },
+          "mime": {
+            "type": "string",
+            "description": "audio/wav (default)"
+          },
+          "start_at": {
+            "type": "string",
+            "description": "When the clip starts, ISO 8601 or milliseconds"
+          },
+          "end_at": {
+            "type": "string",
+            "description": "When it ends"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.transcript.added"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.get_transcript",
+      "title": "Get the transcript",
+      "description": "Read a meeting's transcript: who said what and when, in order. Pass after (a time) to get only newer lines.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "after": {
+            "type": "string",
+            "description": "Only lines that start after this time, ISO 8601 or milliseconds"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.summarise",
+      "title": "Write meeting notes",
+      "description": "Write the meeting notes from the transcript: a summary, decisions and action items. Uses the team's model when one is set (Settings, Notes); otherwise a labelled script writes demo notes. Runs by itself when the meeting ends.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.written"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.get_notes",
+      "title": "Read meeting notes",
+      "description": "Read the meeting notes (summary, decisions, action items), which model wrote them, and where they were sent.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.notes_to_crm",
+      "title": "Save notes to the CRM",
+      "description": "Save the notes as a meeting activity on a CRM record (the meeting's linked deal, contact or organization, or the one you name). Writes the notes first if needed. Inside wOS.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "record": {
+            "type": "string",
+            "description": "crm:deal:<id or name>, crm:contact:..., or crm:org:... (defaults to the meeting's linked record)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.sent"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.notes_to_board",
+      "title": "Add action items to the board",
+      "description": "Add each action item from the notes as a task on the board, for a client, with its owner and due day when the notes name them. Inside wOS.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "client": {
+            "type": "string",
+            "description": "The board client the tasks are for (defaults to the one chosen when notes were turned on)"
+          },
+          "assign": {
+            "type": "boolean",
+            "description": "Assign each task to the person the notes name (default on); off leaves them unassigned"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.sent"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.notes_to_chat",
+      "title": "Post notes in Chat",
+      "description": "Post the notes in a Chat channel: the channel the meeting started from, or the one you name. Inside wOS.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel name or id (defaults to the channel the call started in)"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.sent"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.notes_to_email",
+      "title": "Email the notes",
+      "description": "Email the notes to the people in the meeting who are on the team (or the members you name), through the Email app. Guests are not emailed. Inside wOS.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Team members (email or id); defaults to every team member who joined"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "write",
+      "confirm": "none",
+      "emits": [
+        "meet.notes.sent"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.delete_transcript",
+      "title": "Delete the transcript and notes",
+      "description": "Delete a meeting's transcript and notes. Host only. The consent records stay, as proof of what people agreed to.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "meeting"
+        ],
+        "properties": {
+          "meeting": {
+            "type": "string",
+            "description": "Meeting id, or the token from its join link"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "delete",
+      "confirm": "none",
+      "emits": [
+        "meet.transcript.deleted"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.get_settings",
+      "title": "Read Meetings settings",
+      "description": "The notes model, speech service and recording storage this team (or, standalone, you) set up. Keys are never shown, only whether they are set.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {}
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "read",
+      "confirm": "none",
+      "emits": [],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
+      "name": "meet.set_settings",
+      "title": "Change Meetings settings",
+      "description": "Set the model that writes notes (any OpenAI-compatible address, model and key), a speech service for devices that cannot transcribe, and S3-compatible storage for recordings. Empty clears a value. Keys are stored encrypted.",
+      "input": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "notes_model_url": {
+            "type": "string",
+            "description": "OpenAI-compatible address for meeting notes, for example https://api.openai.com/v1 or http://localhost:11434/v1"
+          },
+          "notes_model": {
+            "type": "string",
+            "description": "Model name, for example gpt-4.1-mini or llama3.1"
+          },
+          "notes_model_key": {
+            "type": "string",
+            "description": "API key for that address (leave empty for a local server)"
+          },
+          "transcribe_url": {
+            "type": "string",
+            "description": "OpenAI-compatible speech-to-text address (Whisper), used only for people whose device cannot transcribe"
+          },
+          "transcribe_model": {
+            "type": "string",
+            "description": "Speech model name, for example whisper-1"
+          },
+          "transcribe_key": {
+            "type": "string",
+            "description": "API key for the speech service"
+          },
+          "s3_endpoint": {
+            "type": "string",
+            "description": "S3-compatible storage address, for example https://<account>.r2.cloudflarestorage.com"
+          },
+          "s3_bucket": {
+            "type": "string",
+            "description": "Bucket for recordings and whiteboards"
+          },
+          "s3_region": {
+            "type": "string",
+            "description": "Region (auto for R2)"
+          },
+          "s3_access_key_id": {
+            "type": "string",
+            "description": "Access key id"
+          },
+          "s3_secret_access_key": {
+            "type": "string",
+            "description": "Secret access key"
+          }
+        }
+      },
+      "output": {
+        "type": "object"
+      },
+      "scope": "admin",
+      "confirm": "none",
+      "emits": [
+        "meet.settings.changed"
+      ],
+      "test": "test/unit/notes.test.mjs"
+    },
+    {
       "name": "meet.start_recording",
       "title": "Start recording",
       "description": "Ask everyone in the call to agree to recording. Recording starts only after the notice is shown and spoken to everyone, and each person's answer is recorded (ROADMAP F11). Not built yet. Planned for v1.",
@@ -1076,56 +1660,6 @@
       "name": "meet.stop_recording",
       "title": "Stop recording",
       "description": "Stop a recording. Not built yet. Planned for v1.",
-      "input": {
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "meeting"
-        ],
-        "properties": {
-          "meeting": {
-            "type": "string",
-            "description": "Meeting id, or the token from its join link"
-          }
-        }
-      },
-      "output": {
-        "type": "object"
-      },
-      "scope": "write",
-      "confirm": "none",
-      "emits": [],
-      "test": "test/unit/tools.test.mjs"
-    },
-    {
-      "name": "meet.get_transcript",
-      "title": "Get the transcript",
-      "description": "Read the transcript of a recorded meeting. Not built yet. Planned for v1.",
-      "input": {
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "meeting"
-        ],
-        "properties": {
-          "meeting": {
-            "type": "string",
-            "description": "Meeting id, or the token from its join link"
-          }
-        }
-      },
-      "output": {
-        "type": "object"
-      },
-      "scope": "read",
-      "confirm": "none",
-      "emits": [],
-      "test": "test/unit/tools.test.mjs"
-    },
-    {
-      "name": "meet.summarise",
-      "title": "Write meeting notes",
-      "description": "Write a summary, decisions and action items from the transcript, to the CRM record or the board. Not built yet. Planned for v1.",
       "input": {
         "additionalProperties": false,
         "type": "object",

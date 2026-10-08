@@ -5,6 +5,7 @@ export function loadConfig(env = process.env) {
   const list = (v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
   const turnUrls = list(env.TURN_URLS);
   return {
+    env,
     publicUrl: env.PUBLIC_URL?.replace(/\/$/, '') || '',
     secret: env.SESSION_SECRET || devSecret(),
     devLogin: env.DEV_LOGIN === '1',

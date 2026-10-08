@@ -13,6 +13,9 @@ export function configure({ callTool: fn, media } = {}) {
   if (media) mediaBase = media;
 }
 export const getMediaBase = () => mediaBase;
+// Large browser libraries (the speech model's runner, the whiteboard, background blur) and their workers are
+// served next to the call's media routes, so the same path works standalone and inside the suite.
+export const assetUrl = (file) => `${mediaBase}/assets/${file}`;
 
 export class ToolFailed extends Error {
   constructor(code, message, status) { super(message); this.code = code; this.status = status; }

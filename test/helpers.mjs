@@ -41,7 +41,8 @@ export async function launch(extra = []) {
   let chromium;
   try { ({ chromium } = await import('playwright')); } catch { ({ chromium } = await import(path.join(os.homedir(), 'crm/node_modules/playwright/index.mjs'))); }
   return chromium.launch({
-    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', ...extra],
+    // --mute-audio: test browsers never play sound out of the computer's speakers.
+    args: ['--mute-audio', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', ...extra],
   });
 }
 
@@ -222,4 +223,52 @@ export async function startServerProcess(env = {}) {
     child.on('exit', (c) => rej(new Error(`server exited ${c}`)));
   });
   return { base, child, async close() { child.kill(); } };
+}
+
+// ---------- notes: known speech and the speech model ----------
+
+// Speech for the notes tests is made at test time with text to speech, written straight to a file in
+// test/.cache/speech (git-ignored) and never played. See scripts/make-test-speech.mjs.
+export const SPEECH = new URL('./.cache/speech/', import.meta.url).pathname;
+export async function ensureSpeech() {
+  if (fs.existsSync(path.join(SPEECH, 'script.json'))) return;
+  const { execFileSync } = await import('node:child_process');
+  execFileSync(process.execPath, [new URL('../scripts/make-test-speech.mjs', import.meta.url).pathname], { stdio: 'ignore' });
+}
+
+// The speech model and its runtime come from the Hugging Face hub and jsDelivr. Tests keep a copy on disk
+// (test/.cache, git-ignored) so each run downloads them once, not once per browser.
+export async function cacheModels(ctx) {
+  const dir = new URL('./.cache/', import.meta.url).pathname;
+  fs.mkdirSync(dir, { recursive: true });
+  const { createHash } = await import('node:crypto');
+  const handler = async (route) => {
+    const url = route.request().url();
+    const key = createHash('sha1').update(url).digest('hex');
+    const file = path.join(dir, key);
+    if (fs.existsSync(file)) {
+      const meta = JSON.parse(fs.readFileSync(`${file}.json`, 'utf8'));
+      return route.fulfill({ status: 200, headers: { 'content-type': meta.type, 'access-control-allow-origin': '*' }, body: fs.readFileSync(file) });
+    }
+    try {
+      const r = await route.fetch({ maxRedirects: 10, timeout: 180000 });
+      const body = await r.body();
+      if (r.status() === 200) { fs.writeFileSync(file, body); fs.writeFileSync(`${file}.json`, JSON.stringify({ url, type: r.headers()['content-type'] ?? 'application/octet-stream' })); }
+      return route.fulfill({ status: r.status(), headers: { ...r.headers(), 'access-control-allow-origin': '*' }, body });
+    } catch { return route.abort(); }
+  };
+  await ctx.route(/^https:\/\/(huggingface\.co|cdn\.jsdelivr\.net|storage\.googleapis\.com)\//, handler);
+}
+
+// Words only, lower case, numbers as words where Whisper writes digits.
+const ORD = { '14th': 'fourteenth', '1st': 'first', '2nd': 'second', '3rd': 'third' };
+export const words = (s) => String(s).toLowerCase().replace(/\b(\d+(st|nd|rd|th))\b/g, (m) => ORD[m] ?? m).replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
+
+// Word error rate: (substitutions + deletions + insertions) / words in the reference.
+export function wer(ref, hyp) {
+  const r = words(ref), h = words(hyp);
+  const d = Array.from({ length: r.length + 1 }, (_, i) => [i, ...Array(h.length).fill(0)]);
+  for (let j = 1; j <= h.length; j++) d[0][j] = j;
+  for (let i = 1; i <= r.length; i++) for (let j = 1; j <= h.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (r[i - 1] === h[j - 1] ? 0 : 1));
+  return { wer: d[r.length][h.length] / r.length, errors: d[r.length][h.length], words: r.length };
 }

@@ -1,5 +1,7 @@
-// Bundles the two browser libraries the screens use (mediasoup-client, livekit-client) into public/vendor.
-// The screens themselves are plain modules in public/app and need no build.
+// Bundles the browser libraries the screens use into public/vendor: mediasoup-client and livekit-client (calls),
+// the speech model's worker (transformers.js running Whisper, for notes), the whiteboard (Excalidraw and
+// Yjs), and background blur (MediaPipe). The screens themselves are plain modules in public/app and need no
+// build. Large runtime files (the speech model, ONNX and MediaPipe WebAssembly) load from their CDNs once.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -8,6 +10,7 @@ const out = path.resolve('public', 'vendor');
 const targets = [
   { entry: 'client/mediasoup-client.mjs', file: 'mediasoup-client.js' },
   { entry: 'client/livekit-client.mjs', file: 'livekit-client.js' },
+  { entry: 'client/whisper-worker.mjs', file: 'whisper-worker.js' },
 ];
 if (ifNeeded && [...targets.map((t) => t.file), 'livekit-e2ee-worker.mjs'].every((f) => fs.existsSync(path.join(out, f)))) process.exit(0);
 let esbuild;

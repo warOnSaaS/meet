@@ -118,9 +118,29 @@ test('every action on every screen has a tool, at desk and phone width', async (
       if (p === 'info') { await host.click('#side [data-act=add-host]'); await host.waitForSelector('.meet-hostcmd'); }
       await check(host, `${p} panel`);
     }
+    // Notes: the panel, turning them on, the notice everyone answers, and the panel with notes written.
+    await host.click('#side [data-panel=notes]');
+    await host.waitForSelector('#side [data-act=notes-start]');
+    await check(host, 'notes panel, off');
+    await host.click('#side [data-act=notes-start]');
+    await host.waitForSelector('#notesdlg[open]');
+    await check(host, 'notes notice');
+    await g.page.waitForSelector('#notesdlg[open]', { timeout: 10000 }).catch(() => {});
+    await host.click('#notesdlg [data-act=notes-out]');
+    await api(srv.base, 'meet.summarise', { meeting: joinUrl.split('/m/')[1] }, { ticket }).catch(() => {});
+    await host.waitForTimeout(300);
+    await check(host, 'notes panel, on');
     await host.click('#side [data-act=close]');
-    await host.click('#bar [data-act=layout]');
+    await host.click('#bar [data-act=more]');
+    await host.waitForSelector('#more .meet-more-i');
+    await check(host, 'more menu');
+    await host.click('#more [data-act=captions]');
+    await host.click('#bar [data-act=more]');
+    await host.click('#more [data-act=layout]');
     await check(host, 'call, speaker view');
+    await g.page.waitForSelector('#notesdlg[open]');
+    await check(g.page, 'notes notice, guest');
+    await g.page.click('#notesdlg [data-act=notes-in]');
     await check(g.page, 'call, guest');
 
     // Leaving, and a "help carry this call" link opened in a browser.

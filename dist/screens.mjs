@@ -40,7 +40,7 @@ async function mediaJoin(body) {
   if (!d.ok) throw new ToolFailed(d.error?.code ?? "server", d.error?.message ?? "Could not join the call.", r.status);
   return d;
 }
-var ticket, setTicket, getTicket, suiteCall, mediaBase, getMediaBase, ToolFailed;
+var ticket, setTicket, getTicket, suiteCall, mediaBase, getMediaBase, assetUrl, ToolFailed;
 var init_api = __esm({
   "public/app/api.mjs"() {
     ticket = null;
@@ -51,6 +51,7 @@ var init_api = __esm({
     suiteCall = null;
     mediaBase = "/media";
     getMediaBase = () => mediaBase;
+    assetUrl = (file) => `${mediaBase}/assets/${file}`;
     ToolFailed = class extends Error {
       constructor(code, message, status) {
         super(message);
@@ -125,7 +126,13 @@ var init_dom = __esm({
       link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
       github: '<path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>',
       more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
-      computer: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'
+      computer: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+      notes: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/>',
+      record: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>',
+      board: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 13l3-3 2 2 4-4M8 21l4-4 4 4"/>',
+      blur: '<circle cx="12" cy="9" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/><path d="M2.5 5.5h2M2.5 10h1.5M19.5 5.5h2M20 10h1.5M2.5 14.5h2M19.5 14.5h2" stroke-dasharray="1 2"/>',
+      captions: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10.5 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6"/>',
+      download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/>'
     };
     icon = (n, size = 20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] ?? ""}</svg>`;
   }
@@ -322,6 +329,640 @@ var init_signal = __esm({
           p.reject(new Error("closed"));
         }
         this.pending.clear();
+      }
+    };
+  }
+});
+
+// public/app/channel.mjs
+async function channelKey(meetingKey) {
+  const raw = await crypto.subtle.digest("SHA-256", enc.encode(`wos-meet channel v1:${meetingKey}`));
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+var enc, dec, b64, unb64, SecureChannel;
+var init_channel = __esm({
+  "public/app/channel.mjs"() {
+    enc = new TextEncoder();
+    dec = new TextDecoder();
+    b64 = (u8) => {
+      let s = "";
+      for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode(...u8.subarray(i, i + 32768));
+      return btoa(s);
+    };
+    unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    SecureChannel = class {
+      constructor(signal, meetingKey) {
+        this.signal = signal;
+        this.key = channelKey(meetingKey);
+        this.handlers = /* @__PURE__ */ new Map();
+        this.stats = { sent: 0, received: 0, failed: 0 };
+        signal.on("enc", (b, m) => this.receive(b, m));
+      }
+      on(type, fn) {
+        (this.handlers.get(type) ?? this.handlers.set(type, []).get(type)).push(fn);
+        return () => this.off(type, fn);
+      }
+      off(type, fn) {
+        const l = this.handlers.get(type);
+        if (l) l.splice(l.indexOf(fn) >>> 0, 1);
+      }
+      /** Send to everyone in the call ('*') or one peer. */
+      async send(type, data, to = "*") {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await this.key, enc.encode(JSON.stringify({ t: type, d: data }))));
+        this.signal.send(to, "enc", { iv: b64(iv), ct: b64(ct) });
+        this.stats.sent++;
+      }
+      async receive(b, m) {
+        let msg;
+        try {
+          const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(b.iv) }, await this.key, unb64(b.ct));
+          msg = JSON.parse(dec.decode(pt));
+        } catch {
+          this.stats.failed++;
+          return;
+        }
+        this.stats.received++;
+        for (const fn of this.handlers.get(msg.t) ?? []) {
+          try {
+            fn(msg.d, m.from);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+    };
+  }
+});
+
+// public/app/notes/transcriber.mjs
+async function detectEngine() {
+  const forced = store.get("meet:engine");
+  if (forced) return forced;
+  const mem = navigator.deviceMemory ?? 8;
+  if (typeof WebAssembly === "object" && typeof Worker === "function" && mem >= 2) {
+    if (navigator.gpu) {
+      try {
+        if (await navigator.gpu.requestAdapter()) return "whisper-webgpu";
+      } catch {
+      }
+    }
+    return "whisper-wasm";
+  }
+  if (globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition) return "web-speech";
+  return "none";
+}
+function loadWhisper(engine, onProgress) {
+  if (workerReady) return workerReady;
+  worker = new Worker(assetUrl("whisper-worker.js"), { type: "module" });
+  const t0 = performance.now();
+  workerReady = new Promise((resolve, reject) => {
+    worker.onmessage = (e) => {
+      const d = e.data;
+      if (d.op === "progress") {
+        whisperStats.progress = d;
+        onProgress?.(d);
+      }
+      if (d.op === "ready") {
+        whisperStats.loads++;
+        whisperStats.loadMs = Math.round(performance.now() - t0);
+        whisperStats.device = d.device;
+        whisperStats.model = d.model;
+        resolve(d);
+      }
+      if (d.op === "error" && !d.id) reject(new Error(d.message));
+      if (d.id && waiting.has(d.id)) {
+        const w = waiting.get(d.id);
+        waiting.delete(d.id);
+        d.op === "error" ? w.reject(new Error(d.message)) : w.resolve(d);
+      }
+    };
+    worker.onerror = (e) => reject(new Error(e.message || "The speech model could not start."));
+  });
+  worker.postMessage({ op: "load", model: modelFor(engine), device: engine === "whisper-webgpu" ? "webgpu" : "wasm" });
+  return workerReady;
+}
+async function whisper(audio) {
+  await workerReady;
+  const id = ++seq;
+  return new Promise((resolve, reject) => {
+    waiting.set(id, { resolve, reject });
+    worker.postMessage({ op: "run", id, audio }, [audio.buffer]);
+  });
+}
+function wavBase64(f32) {
+  const n = f32.length;
+  const buf = new DataView(new ArrayBuffer(44 + n * 2));
+  const w = (o, s2) => {
+    for (let i = 0; i < s2.length; i++) buf.setUint8(o + i, s2.charCodeAt(i));
+  };
+  w(0, "RIFF");
+  buf.setUint32(4, 36 + n * 2, true);
+  w(8, "WAVE");
+  w(12, "fmt ");
+  buf.setUint32(16, 16, true);
+  buf.setUint16(20, 1, true);
+  buf.setUint16(22, 1, true);
+  buf.setUint32(24, RATE, true);
+  buf.setUint32(28, RATE * 2, true);
+  buf.setUint16(32, 2, true);
+  buf.setUint16(34, 16, true);
+  w(36, "data");
+  buf.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) buf.setInt16(44 + i * 2, Math.max(-1, Math.min(1, f32[i])) * 32767, true);
+  const u8 = new Uint8Array(buf.buffer);
+  let s = "";
+  for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode(...u8.subarray(i, i + 32768));
+  return btoa(s);
+}
+var ENGINE_LABEL, store, modelFor, worker, workerReady, seq, waiting, whisperStats, NOISE, WORKLET, RATE, FRAME, Utterances, Transcriber;
+var init_transcriber = __esm({
+  "public/app/notes/transcriber.mjs"() {
+    init_api();
+    ENGINE_LABEL = {
+      "whisper-webgpu": "Whisper on this device, using its graphics chip",
+      "whisper-wasm": "Whisper on this device",
+      "web-speech": "Your browser's speech service (Chrome and Safari may send your audio to their servers)",
+      none: "This device cannot write down speech, so a helper in the call or the server does it",
+      helper: "A helper in the call",
+      server: "The team's speech service"
+    };
+    store = { get: (k) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    } };
+    modelFor = (engine) => store.get("meet:whisper-model") || (engine === "whisper-webgpu" ? "onnx-community/whisper-base.en" : "onnx-community/whisper-tiny.en");
+    worker = null;
+    workerReady = null;
+    seq = 0;
+    waiting = /* @__PURE__ */ new Map();
+    whisperStats = { loads: 0, loadMs: null, runs: 0, totalMs: 0, audioMs: 0, device: null, model: null, progress: null };
+    NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|you\.?|thank you\.?|thanks for watching!?|\.+)\s*$/i;
+    WORKLET = `class Tap extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(2048); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) { for (let i = 0; i < ch.length; i++) { this.buf[this.n++] = ch[i]; if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice(0)); this.n = 0; } } }
+    return true;
+  }
+}
+registerProcessor('meet-tap', Tap);`;
+    RATE = 16e3;
+    FRAME = 480;
+    Utterances = class {
+      /** onUtterance({ audio: Float32Array at 16 kHz, start, end, speechEnd }) with times in ms since 1970. */
+      constructor(track, { onUtterance, hangMs = 700, maxMs = 15e3, minMs = 350 } = {}) {
+        Object.assign(this, { track, onUtterance, hangMs, maxMs, minMs });
+        this.level = 0;
+      }
+      async start() {
+        this.ctx = new AudioContext();
+        const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
+        await this.ctx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+        this.src = this.ctx.createMediaStreamSource(new MediaStream([this.track]));
+        this.node = new AudioWorkletNode(this.ctx, "meet-tap");
+        const mute = this.ctx.createGain();
+        mute.gain.value = 0;
+        this.src.connect(this.node).connect(mute).connect(this.ctx.destination);
+        this.ratio = this.ctx.sampleRate / RATE;
+        this.carry = 0;
+        this.pending = new Float32Array(0);
+        this.pre = [];
+        this.cur = null;
+        this.floor = 4e-3;
+        this.node.port.onmessage = (e) => this.feed(e.data);
+        if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {
+        });
+      }
+      // Down to 16 kHz by averaging (enough for speech), then 30 ms frames. Samples not used yet wait in rest.
+      feed(chunk) {
+        const input = this.rest?.length ? new Float32Array(this.rest.length + chunk.length) : chunk;
+        if (input !== chunk) {
+          input.set(this.rest);
+          input.set(chunk, this.rest.length);
+        }
+        const out = [];
+        let pos = this.carry;
+        while (pos + this.ratio <= input.length) {
+          let s = 0;
+          const a = Math.floor(pos), b = Math.floor(pos + this.ratio);
+          for (let i2 = a; i2 < b; i2++) {
+            const x = input[i2];
+            if (x === x) s += x;
+          }
+          out.push(s / Math.max(1, b - a));
+          pos += this.ratio;
+        }
+        const used = Math.floor(pos);
+        this.carry = pos - used;
+        this.rest = input.slice(used);
+        const joined = new Float32Array(this.pending.length + out.length);
+        joined.set(this.pending);
+        joined.set(out, this.pending.length);
+        let i = 0;
+        for (; i + FRAME <= joined.length; i += FRAME) this.frame(joined.subarray(i, i + FRAME));
+        this.pending = joined.slice(i);
+      }
+      frame(f) {
+        const now = performance.timeOrigin + performance.now();
+        let sum = 0;
+        for (const v of f) sum += v * v;
+        const rms = Number.isFinite(sum) ? Math.sqrt(sum / f.length) : 0;
+        this.level = rms;
+        this.floor = rms < this.floor ? this.floor * 0.9 + rms * 0.1 : this.floor * 0.999 + rms * 1e-3;
+        if (!Number.isFinite(this.floor)) this.floor = 4e-3;
+        const loud = rms > Math.max(0.01, this.floor * 3);
+        const copy = f.slice(0);
+        if (!this.cur) {
+          this.pre.push(copy);
+          if (this.pre.length > 10) this.pre.shift();
+          if (loud) {
+            this.cur = { frames: [...this.pre], start: now - this.pre.length * 30, lastLoud: now, loudFrames: 1 };
+            this.pre = [];
+          }
+          return;
+        }
+        this.cur.frames.push(copy);
+        if (loud) {
+          this.cur.lastLoud = now;
+          this.cur.loudFrames++;
+        }
+        const len = this.cur.frames.length * 30;
+        if (now - this.cur.lastLoud > this.hangMs || len > this.maxMs) this.flush(now);
+      }
+      flush(now = performance.timeOrigin + performance.now()) {
+        const c = this.cur;
+        this.cur = null;
+        if (!c || c.loudFrames * 30 < this.minMs) return;
+        const audio = new Float32Array(c.frames.length * FRAME);
+        c.frames.forEach((f, i) => audio.set(f, i * FRAME));
+        this.onUtterance?.({ audio, start: c.start, end: now, speechEnd: c.lastLoud });
+      }
+      stop() {
+        this.flush();
+        try {
+          this.src?.disconnect();
+          this.node?.disconnect();
+        } catch {
+        }
+        this.ctx?.close().catch(() => {
+        });
+      }
+    };
+    Transcriber = class {
+      /**
+       * engine: whisper-webgpu | whisper-wasm | web-speech | server
+       * onSegment({ id, start_at, end_at, text, engine, speech_end, run_ms })
+       * server: async (wavBase64, start, end) => text, for the server fallback.
+       */
+      constructor({ track, engine, onSegment, onState, server }) {
+        Object.assign(this, { track, engine, onSegment, onState, server });
+        this.queue = Promise.resolve();
+        this.n = 0;
+      }
+      async start() {
+        if (this.engine === "web-speech") return this.startWebSpeech();
+        if (this.engine.startsWith("whisper")) {
+          this.onState?.("loading");
+          await loadWhisper(this.engine, (p) => this.onState?.("loading", p));
+        }
+        this.cuts = new Utterances(this.track, { onUtterance: (u) => {
+          this.queue = this.queue.then(() => this.write(u)).catch((e) => console.warn("[meet] notes", e.message));
+        } });
+        await this.cuts.start();
+        this.onState?.("listening");
+      }
+      async write(u) {
+        if (this.stopped) return;
+        const t0 = performance.now();
+        let text = "";
+        if (this.engine === "server") text = await this.server(wavBase64(u.audio), u.start, u.end);
+        else {
+          const audioMs = u.audio.length / RATE * 1e3;
+          const r = await whisper(u.audio);
+          text = r.text;
+          whisperStats.runs++;
+          whisperStats.totalMs += r.ms;
+          whisperStats.audioMs += audioMs;
+        }
+        text = String(text ?? "").trim();
+        if (!text || NOISE.test(text)) return;
+        this.onSegment?.({ id: `${this.idBase ??= Math.random().toString(36).slice(2, 8)}-${++this.n}`, start_at: Math.round(u.start), end_at: Math.round(u.end), text, engine: this.engine, speech_end: Math.round(u.speechEnd), run_ms: Math.round(performance.now() - t0) });
+      }
+      startWebSpeech() {
+        const SR = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
+        const r = new SR();
+        r.continuous = true;
+        r.interimResults = false;
+        r.lang = navigator.language || "en-US";
+        let start = performance.timeOrigin + performance.now();
+        r.onspeechstart = () => {
+          start = performance.timeOrigin + performance.now();
+        };
+        r.onresult = (e) => {
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            if (!e.results[i].isFinal) continue;
+            const end = performance.timeOrigin + performance.now();
+            const text = e.results[i][0].transcript.trim();
+            if (text) this.onSegment?.({ id: `ws-${++this.n}-${Math.round(end)}`, start_at: Math.round(start), end_at: Math.round(end), text, engine: "web-speech", speech_end: Math.round(end), run_ms: 0 });
+            start = end;
+          }
+        };
+        r.onerror = (e) => this.onState?.("error", { message: e.error === "not-allowed" ? "The browser blocked its speech service." : `The browser's speech service stopped (${e.error}).` });
+        r.onend = () => {
+          if (!this.stopped) try {
+            r.start();
+          } catch {
+          }
+        };
+        r.start();
+        this.sr = r;
+        this.onState?.("listening");
+      }
+      get level() {
+        return this.cuts?.level ?? 0;
+      }
+      stop() {
+        this.stopped = true;
+        this.cuts?.stop();
+        try {
+          this.sr?.stop();
+        } catch {
+        }
+      }
+    };
+  }
+});
+
+// public/app/notes.mjs
+function plain(n) {
+  const out = [n.title ? `Meeting notes: ${n.title}` : "Meeting notes", n.scripted ? "(Demo notes, a script, not AI)" : "", "", n.summary];
+  if (n.decisions?.length) out.push("", "Decisions:", ...n.decisions.map((d) => `- ${d}`));
+  if (n.action_items?.length) out.push("", "Action items:", ...n.action_items.map((a) => `- ${a.text}${a.owner ? ` (${a.owner})` : ""}`));
+  return out.join("\n");
+}
+var CAPTION_MS, Notes;
+var init_notes = __esm({
+  "public/app/notes.mjs"() {
+    init_api();
+    init_dom();
+    init_channel();
+    init_transcriber();
+    CAPTION_MS = 9e3;
+    Notes = class {
+      constructor(call) {
+        this.call = call;
+        this.status = null;
+        this.timeline = /* @__PURE__ */ new Map();
+        this.metrics = [];
+        this.notes = null;
+        this.captions = true;
+        this.own = null;
+        this.helping = /* @__PURE__ */ new Map();
+        this.state = "off";
+        this.engine = null;
+      }
+      get mid() {
+        return this.call.meeting.id;
+      }
+      async init() {
+        this.channel = new SecureChannel(this.call.signal, this.call.media.e2ee_key);
+        this.call.channel = this.channel;
+        this.channel.on("cap", (seg, from) => this.received(seg, from));
+        this.engine = await detectEngine();
+        await this.load();
+        if (this.status?.on || this.status?.segments) await this.loadTranscript();
+      }
+      async load() {
+        try {
+          this.status = await callTool("meet.notes_status", { meeting: this.mid });
+        } catch {
+          return;
+        }
+        if (this.status.notes_written_at && (!this.notes || this.notes.written_at !== this.status.notes_written_at)) this.notes = await callTool("meet.get_notes", { meeting: this.mid }).catch(() => this.notes);
+        await this.reconcile();
+        this.call.render();
+      }
+      async loadTranscript() {
+        const r = await callTool("meet.get_transcript", { meeting: this.mid }).catch(() => null);
+        for (const s of r?.segments ?? []) this.add({ ...s, start_at: Date.parse(s.start_at), end_at: Date.parse(s.end_at), name: s.speaker, pid: s.participant });
+      }
+      get mine() {
+        return this.status?.you;
+      }
+      // Start or stop the transcribers this device should run, from the latest status.
+      async reconcile() {
+        const s = this.status;
+        const on = !!s?.on;
+        const want = on && this.mine?.answer === "include" && this.call.audioOn && this.call.local.mic && this.call.canPublish();
+        const by = this.mine?.written_by;
+        const ownEngine = by === "self" ? this.engine : by === "server" ? "server" : null;
+        if (on && this.mine?.answer === "pending" && !this.asked) this.ask();
+        if (!want || !ownEngine) {
+          this.own?.stop();
+          this.own = null;
+        } else if (!this.own || this.own.track !== this.call.local.mic || this.own.engine !== ownEngine) {
+          this.own?.stop();
+          this.own = this.makeTranscriber(this.call.local.mic, ownEngine, { pid: this.call.me.id, name: this.call.me.display_name });
+        }
+        const helpFor = new Set(on && /^whisper/.test(this.engine) ? s.helping : []);
+        for (const [pid, t] of this.helping) if (!helpFor.has(pid) || t.track !== this.call.remoteFor(pid, "mic")) {
+          t.stop();
+          this.helping.delete(pid);
+        }
+        for (const pid of helpFor) {
+          if (this.helping.has(pid)) continue;
+          const track = this.call.remoteFor(pid, "mic");
+          const person = s.people.find((p) => p.participant === pid);
+          if (track && person) this.helping.set(pid, this.makeTranscriber(track, this.engine, { pid, name: person.name, helper: true }));
+        }
+        this.state = !on ? "off" : this.own?.state ?? (this.mine?.answer === "exclude" ? "excluded" : this.mine?.answer === "pending" ? "asking" : !this.call.audioOn ? "muted" : "waiting");
+      }
+      makeTranscriber(track, engine, who) {
+        const t = new Transcriber({
+          track,
+          engine,
+          server: async (wav, start, end) => (await callTool("meet.transcribe_audio", { meeting: this.mid, audio_base64: wav, start_at: String(Math.round(start)), end_at: String(Math.round(end)) })).text,
+          onState: (st, p) => {
+            t.state = st;
+            if (!who.helper) {
+              this.state = st;
+              this.progress = p;
+            }
+            if (st === "error") toast(p?.message ?? "Notes stopped on this device.");
+            this.call.render();
+          },
+          onSegment: (seg) => this.spoke(seg, who, engine === "server")
+        });
+        t.start().catch((e) => {
+          t.state = "error";
+          this.state = "error";
+          toast(e.message);
+          this.call.render();
+        });
+        return t;
+      }
+      // A line this device wrote down: show it, send it to the others encrypted, and keep it with the meeting.
+      async spoke(seg, who, savedByServer) {
+        const line = { ...seg, pid: who.pid, name: who.name };
+        this.add(line);
+        this.channel.send("cap", line).catch(() => {
+        });
+        if (!savedByServer) {
+          await callTool("meet.add_transcript", { meeting: this.mid, segments: [{ id: seg.id, participant: who.pid, start_at: String(seg.start_at), end_at: String(seg.end_at), text: seg.text, engine: seg.engine }] }).catch((e) => console.warn("[meet] transcript", e.message));
+        }
+      }
+      received(seg, from) {
+        if (!seg?.id || this.timeline.has(seg.id)) return;
+        this.metrics.push({ id: seg.id, from, pid: seg.pid, speech_end: seg.speech_end, arrived: Math.round(performance.timeOrigin + performance.now()), run_ms: seg.run_ms });
+        this.add(seg);
+      }
+      add(seg) {
+        if (this.timeline.has(seg.id)) return;
+        this.timeline.set(seg.id, seg);
+        this.call.render();
+      }
+      lines() {
+        return [...this.timeline.values()].sort((a, b) => a.start_at - b.start_at);
+      }
+      ask() {
+        this.asked = true;
+        this.shownAt = (/* @__PURE__ */ new Date()).toISOString();
+        const d = this.call.root.querySelector("#notesdlg");
+        if (!d) return;
+        d.innerHTML = `<h3>Notes are on</h3>
+      <p>${esc(this.status.started_by ?? "The host")} turned on AI notes. If you agree, your device writes down what you say, and your words are kept with this meeting so the team gets a summary and action items.</p>
+      <p class="ui-mute">Your device does it with ${esc(ENGINE_LABEL[this.engine] ?? this.engine).replace(/^./, (c) => c.toLowerCase())}. You can change your answer any time, or leave the call.</p>
+      <div class="ui-dialog-a"><button class="ui-btn is-ghost" data-tool="meet.answer_notes" data-act="notes-out">Leave my voice out</button><button class="ui-btn is-accent" data-tool="meet.answer_notes" data-act="notes-in">Include my voice</button></div>`;
+        if (!d.open) try {
+          d.showModal();
+        } catch {
+          d.setAttribute("open", "");
+        }
+      }
+      async answer(include) {
+        const d = this.call.root.querySelector("#notesdlg");
+        if (d?.open) d.close();
+        await callTool("meet.answer_notes", { meeting: this.mid, include, engine: this.engine, ...this.shownAt ? { shown_at: this.shownAt } : {} });
+        toast(include ? "Your voice is in the notes." : "Your voice is left out of the notes.");
+        await this.load();
+      }
+      // ------------------------------------------------------------ drawing
+      marker() {
+        if (!this.status?.on) return "";
+        return `<span class="ui-chip is-soft meet-notes-on" title="Notes are on: words of people who agreed are written down"><span class="ui-dot is-bad"></span> Notes on</span>`;
+      }
+      captionsHtml() {
+        if (!this.status?.on && !this.timeline.size) return "";
+        if (!this.captions) return "";
+        const now = Date.now();
+        const recent = this.lines().filter((s) => now - s.end_at < CAPTION_MS).slice(-3);
+        if (!recent.length) return "";
+        return `<div class="meet-captions" aria-live="polite">${recent.map((s) => `<p><b>${esc(s.name)}</b> ${esc(s.text)}</p>`).join("")}</div>`;
+      }
+      panelHtml() {
+        const s = this.status;
+        const host = this.call.amHost();
+        if (!s) return '<p class="ui-empty">Loading notes\u2026</p>';
+        const mine = s.you;
+        const stateWord = { loading: `Loading the speech model${this.progress?.total ? ` (${Math.round(this.progress.loaded / this.progress.total * 100)}%)` : ""}\u2026`, listening: "Listening", muted: "Paused while you are muted", excluded: "Your voice is left out", asking: "Waiting for your answer", waiting: "Starting\u2026", error: "Stopped on this device", off: "" }[this.state] ?? "";
+        const writtenBy = mine?.written_by === "self" ? ENGINE_LABEL[this.engine] : mine?.written_by === "server" ? ENGINE_LABEL.server : mine?.written_by?.startsWith("helper:") ? `${ENGINE_LABEL.helper}: ${esc(s.people.find((p) => `helper:${p.participant}` === mine.written_by)?.name ?? "someone")}` : mine?.answer === "include" ? "Nobody can yet: this device cannot, and there is no helper or speech service" : "";
+        const head = s.on ? `<div class="meet-notes-h"><span class="ui-dot is-bad"></span><span><b>Notes are on</b><br><span class="ui-mute">Turned on by ${esc(s.started_by ?? "the host")}. Only people who agreed are written down.</span></span></div>` : `<div class="meet-notes-h"><span class="ui-dot"></span><span><b>Notes are off</b><br><span class="ui-mute">${host ? "Turn them on and everyone is asked first. Each person's own device writes down their words." : "The host can turn on AI notes. You will be asked first."}</span></span></div>`;
+        const hostA = host ? `<p class="meet-side-a">${s.on ? '<button class="ui-btn is-quiet is-sm" data-tool="meet.stop_notes" data-act="notes-stop">Turn notes off</button>' : '<button class="ui-btn is-accent is-sm" data-tool="meet.start_notes" data-act="notes-start">Turn notes on</button>'}</p>` : "";
+        const me = s.on && mine ? `<h3 class="meet-side-sub">Your voice</h3>
+      <div class="meet-notes-me"><span>${mine.answer === "include" ? "Included" : mine.answer === "exclude" ? "Left out" : "Not answered yet"}${stateWord ? ` \xB7 ${esc(stateWord)}` : ""}</span>
+      ${mine.answer === "include" ? '<button class="ui-btn is-ghost is-sm" data-tool="meet.answer_notes" data-act="notes-out">Leave my voice out</button>' : '<button class="ui-btn is-ghost is-sm" data-tool="meet.answer_notes" data-act="notes-in">Include my voice</button>'}</div>
+      ${writtenBy ? `<p class="ui-hint">Written down by: ${writtenBy}</p>` : ""}` : "";
+        const people = s.on ? `<h3 class="meet-side-sub">Everyone</h3><ul class="meet-plist">${s.people.map((p) => `<li class="meet-nrow"><span>${esc(p.name)}</span><span class="ui-chip ${p.answer === "include" ? "is-good" : "is-outline"}">${p.answer === "include" ? "Included" : p.answer === "exclude" ? "Left out" : "Asked"}</span></li>`).join("")}</ul>` : "";
+        const lines = this.lines();
+        const transcript = lines.length ? `<h3 class="meet-side-sub">Transcript <span class="ui-badge is-quiet">${lines.length}</span></h3><ol class="meet-transcript">${lines.map((l) => `<li><span class="meet-tr-h"><b>${esc(l.name)}</b> <time class="ui-mute">${new Date(l.start_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</time></span><span>${esc(l.text)}</span></li>`).join("")}</ol>` : s.on ? '<p class="ui-empty">Nothing said yet. Lines show here a moment after someone stops talking.</p>' : "";
+        const n = this.notes?.summary ? this.notes : null;
+        const notes = n ? `<h3 class="meet-side-sub">Notes ${n.scripted ? '<span class="ui-chip is-outline">Demo notes (a script, not AI)</span>' : `<span class="ui-chip is-outline">${esc(n.model)}</span>`}</h3>
+      <div class="meet-notes-b"><p>${esc(n.summary)}</p>
+      ${n.decisions.length ? `<p class="ui-label">Decisions</p><ul>${n.decisions.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+      ${n.action_items.length ? `<p class="ui-label">Action items</p><ul>${n.action_items.map((a) => `<li>${esc(a.text)}${a.owner || a.due ? ` <span class="ui-mute">(${esc([a.owner, a.due].filter(Boolean).join(", "))})</span>` : ""}</li>`).join("")}</ul>` : ""}</div>` : "";
+        const canWrite = lines.length || s.segments;
+        const del = host && s.segments ? '<button class="ui-btn is-ghost is-sm is-danger" data-tool="meet.delete_transcript" data-act="notes-delete">Delete transcript and notes</button>' : "";
+        const write = canWrite ? `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.summarise" data-act="notes-write">${n ? "Write the notes again" : "Write notes now"}</button>${n ? '<button class="ui-btn is-ghost is-sm" data-tool="meet.get_notes" data-act="notes-copy">Copy notes</button>' : ""}</p>${!s.model.ready ? '<p class="ui-hint">No model is set up, so a short script writes demo notes. Set a model in Settings to have AI write them.</p>' : ""}` : "";
+        const linked = this.call.meeting.linked_record ?? "";
+        const send = n ? s.in_suite ? `<h3 class="meet-side-sub">Send the notes</h3><div class="meet-send">
+        <form data-tool="meet.notes_to_crm" data-act="send-crm"><label class="ui-sr" for="n-crm">CRM record</label><input class="ui-input" id="n-crm" name="record" placeholder="crm:deal:Acme Dental" value="${esc(linked.startsWith("crm:") ? linked : "")}"><button class="ui-btn is-sm" type="submit" data-tool="meet.notes_to_crm">Save to CRM</button></form>
+        <form data-tool="meet.notes_to_board" data-act="send-board"><label class="ui-sr" for="n-board">Board client</label><input class="ui-input" id="n-board" name="client" placeholder="Client on the board"><button class="ui-btn is-sm" type="submit" data-tool="meet.notes_to_board">Add tasks</button></form>
+        <form data-tool="meet.notes_to_chat" data-act="send-chat"><label class="ui-sr" for="n-chat">Chat channel</label><input class="ui-input" id="n-chat" name="channel" placeholder="general" value="${esc(linked.startsWith("chat:") ? linked.split(":").pop() : "")}"><button class="ui-btn is-sm" type="submit" data-tool="meet.notes_to_chat">Post in Chat</button></form>
+        <p><button class="ui-btn is-sm" data-tool="meet.notes_to_email" data-act="send-email">Email everyone on the team who joined</button></p>
+      </div>` : '<p class="ui-hint">Inside wOS, the notes go to the CRM, the board, Chat and email in one click.</p>' : "";
+        return `${head}${hostA}${me}${notes}${write}${send}${transcript}${people}${del ? `<p class="meet-side-a">${del}</p>` : ""}`;
+      }
+      async onAct(a, el) {
+        const mid = this.mid;
+        if (a === "notes-start") {
+          await callTool("meet.start_notes", { meeting: mid });
+          toast("Notes are on. Everyone is asked first.");
+          return this.load();
+        }
+        if (a === "notes-stop") {
+          await callTool("meet.stop_notes", { meeting: mid });
+          return this.load();
+        }
+        if (a === "notes-in") return this.answer(true);
+        if (a === "notes-out") return this.answer(false);
+        if (a === "notes-write") {
+          toast("Writing the notes\u2026");
+          this.notes = await callTool("meet.summarise", { meeting: mid });
+          if (this.notes.warning) toast(this.notes.warning);
+          return this.call.render();
+        }
+        if (a === "notes-delete") {
+          if (!confirm("Delete this meeting's transcript and notes for everyone? This cannot be undone.")) return;
+          await callTool("meet.delete_transcript", { meeting: mid });
+          this.timeline.clear();
+          this.notes = null;
+          toast("Transcript and notes deleted");
+          return this.load();
+        }
+        if (a === "notes-copy") {
+          const n = await callTool("meet.get_notes", { meeting: mid });
+          await copyText(plain(n));
+          return toast("Notes copied");
+        }
+        if (a === "send-email") {
+          const r = await callTool("meet.notes_to_email", { meeting: mid });
+          return toast(`Emailed ${r.to.length} ${r.to.length === 1 ? "person" : "people"}`);
+        }
+        if (a === "captions") {
+          this.captions = !this.captions;
+          return this.call.render();
+        }
+      }
+      async onSubmit(form) {
+        const f = new FormData(form);
+        const mid = this.mid;
+        const act = form.dataset.act;
+        if (act === "send-crm") {
+          const r = await callTool("meet.notes_to_crm", { meeting: mid, record: String(f.get("record") || "").trim() || "linked" });
+          toast(`Saved to ${r.to}`);
+        }
+        if (act === "send-board") {
+          const r = await callTool("meet.notes_to_board", { meeting: mid, client: String(f.get("client") || "").trim() || void 0 });
+          toast(r.sent ? `Added ${r.tasks.length} ${r.tasks.length === 1 ? "task" : "tasks"} for ${r.client}` : r.message);
+        }
+        if (act === "send-chat") {
+          const r = await callTool("meet.notes_to_chat", { meeting: mid, channel: String(f.get("channel") || "").trim() || void 0 });
+          toast(`Posted in ${r.channel}`);
+        }
+      }
+      // For tests and the report.
+      snapshot() {
+        return { state: this.state, engine: this.engine, status: this.status, lines: this.lines(), metrics: this.metrics, whisper: { ...whisperStats }, channel: this.channel?.stats, notes: this.notes };
+      }
+      stop() {
+        this.own?.stop();
+        for (const t of this.helping.values()) t.stop();
+        this.helping.clear();
       }
     };
   }
@@ -571,6 +1212,7 @@ var init_call = __esm({
     init_api();
     init_signal();
     init_dom();
+    init_notes();
     SPEAK_LEVEL = 0.03;
     VIEWER_DELAY_MS = 2e3;
     Call = class {
@@ -619,6 +1261,8 @@ var init_call = __esm({
         this.signal.start();
         if (j.plan) await this.applyPlan(j.plan);
         await Promise.all([this.loadPeople(), this.loadChat(), this.loadStatus()]);
+        this.notes = new Notes(this);
+        await this.notes.init().catch((e) => console.warn("[meet] notes", e.message));
         this.levelT = setInterval(() => this.pollLevels(), 250);
         this.statT = setInterval(() => this.refreshTrouble(), 3e3);
         window.addEventListener("pagehide", this.onHide = () => {
@@ -629,6 +1273,7 @@ var init_call = __esm({
       async stopMedia() {
         clearInterval(this.levelT);
         clearInterval(this.statT);
+        this.notes?.stop();
         if (this.onHide) window.removeEventListener("pagehide", this.onHide);
         this.ro?.disconnect();
         await this.engine?.stop().catch(() => {
@@ -744,6 +1389,8 @@ var init_call = __esm({
         }
         track.onmute = track.onunmute = () => this.render();
         if (!this.timings.firstRemote) this.timings.firstRemote = performance.now();
+        if (track.kind === "audio") this.notes?.reconcile().catch(() => {
+        });
         this.render();
       }
       trackGone(key) {
@@ -875,6 +1522,7 @@ var init_call = __esm({
           if (b.what === "participants" || b.what === "waiting") this.loadPeople();
           if (b.what === "chat") this.loadChat();
           if (b.what === "meeting") this.loadStatus();
+          if (b.what === "notes" || b.what === "participants" && this.notes?.status?.on) this.notes?.load();
         }, 60);
       }
       async onCmd(b) {
@@ -917,6 +1565,8 @@ var init_call = __esm({
         this.audioOn = on;
         if (this.local.mic) this.local.mic.enabled = on;
         if (!fromServer) await callTool("meet.set_my_media", { meeting: this.meeting.id, audio: on }).catch((e) => toast(e.message));
+        await this.notes?.reconcile().catch(() => {
+        });
         this.render();
       }
       async setCam(on, fromServer = false) {
@@ -1012,6 +1662,7 @@ var init_call = __esm({
           this.speaking = speaking;
           this.render();
         }
+        this.renderCaptions();
       }
       async refreshTrouble() {
         if (this.engine?.kind !== "p2p") return;
@@ -1028,12 +1679,17 @@ var init_call = __esm({
       </div>
       <nav class="ui-callbar meet-bar" id="bar" aria-label="Call controls"></nav>
       <div id="audios" hidden></div>
+      <dialog class="ui-dialog meet-dlg" id="notesdlg" aria-label="Notes notice"></dialog>
+      <div class="meet-more" id="more" hidden></div>
     </div>`;
         this.root.removeAttribute("aria-busy");
         this.root.querySelector("#bar").addEventListener("click", (e) => this.onBar(e));
         this.root.querySelector("#side").addEventListener("click", (e) => this.onSide(e));
         this.root.querySelector("#side").addEventListener("submit", (e) => this.onSideSubmit(e));
         this.root.querySelector("#notices").addEventListener("click", (e) => this.onNotice(e));
+        this.root.querySelector("#notesdlg").addEventListener("click", (e) => this.onSide(e));
+        this.root.querySelector("#notesdlg").addEventListener("cancel", (e) => e.preventDefault());
+        this.root.querySelector("#more").addEventListener("click", (e) => this.onMore(e));
       }
       render() {
         if (this.exited || !this.root.querySelector(".meet-call")) return;
@@ -1046,6 +1702,9 @@ var init_call = __esm({
         root.dataset.panel = this.panel ?? "";
         root.dataset.layout = this.layout;
         this.root.querySelector("#mode").textContent = modeLabel(this.plan, this.engine);
+        const topr = this.markers();
+        const tr = this.root.querySelector("#topr");
+        if (tr.innerHTML !== topr) tr.innerHTML = topr;
         this.renderNotices();
         this.renderStage();
         this.renderBar();
@@ -1083,7 +1742,7 @@ var init_call = __esm({
         let main = stage.querySelector(".meet-main");
         let grid = stage.querySelector(".ui-calls");
         if (!grid) {
-          stage.innerHTML = '<div class="meet-main"></div><div class="ui-calls"></div>';
+          stage.innerHTML = '<div class="meet-main"></div><div class="ui-calls"></div><div class="meet-cap" id="captions"></div>';
           main = stage.querySelector(".meet-main");
           grid = stage.querySelector(".ui-calls");
         }
@@ -1112,6 +1771,7 @@ var init_call = __esm({
           if (el.parentElement === grid) grid.append(el);
         }
         this.fit();
+        this.renderCaptions();
         const owners = (pred) => list.filter(pred).flatMap((t) => this.peersOf(t.pid));
         this.engine?.setView?.({ visible: owners((t) => !t.mine && t !== big), big: big && !big.mine ? this.peersOf(big.pid)[0] ?? null : null });
       }
@@ -1205,12 +1865,13 @@ var init_call = __esm({
           canPub ? b("mic", "meet.set_my_media", this.audioOn, this.audioOn ? "Mute" : "Unmute", icon(this.audioOn ? "mic" : "mic-off")) : "",
           canPub ? b("cam", "meet.set_my_media", this.videoOn, this.videoOn ? "Turn camera off" : "Turn camera on", icon(this.videoOn ? "cam" : "cam-off")) : "",
           canPub && navigator.mediaDevices?.getDisplayMedia ? b("share", "meet.set_sharing", this.local.screen ? true : null, this.local.screen ? "Stop sharing" : "Share screen", icon("screen")).replace("<button", `<button class="${this.local.screen ? "is-on" : ""}"`) : "",
-          b("hand", "meet.raise_hand", hand ? true : null, hand ? "Lower hand" : "Raise hand", icon("hand")).replace("<button", `<button class="${hand ? "is-on" : ""}"`),
-          b("layout", "meet.set_layout", null, this.layout === "grid" ? "Speaker view" : "Grid view", icon(this.layout === "grid" ? "speaker" : "grid")),
+          b("hand", "meet.raise_hand", hand ? true : null, hand ? "Lower hand" : "Raise hand", icon("hand")).replace("<button", `<button class="meet-hide-sm ${hand ? "is-on" : ""}"`),
+          b("layout", "meet.set_layout", null, this.layout === "grid" ? "Speaker view" : "Grid view", icon(this.layout === "grid" ? "speaker" : "grid")).replace("<button", '<button class="meet-hide-sm"'),
           `<span class="meet-bar-sep" aria-hidden="true"></span>`,
           b("people", "none", null, "People", `${icon("people")}${this.amHost() && this.waiting ? `<span class="meet-dot">${this.waiting}</span>` : ""}`, "opens the people panel"),
           b("chat", "none", null, "Chat", `${icon("chat")}${unread && this.panel !== "chat" ? `<span class="meet-dot">${unread}</span>` : ""}`, "opens the chat panel"),
-          b("info", "none", null, "Call details", icon("info"), "opens call details"),
+          b("notes", "none", null, this.notes?.status?.on ? "Notes (on)" : "Notes", `${icon("notes")}${this.notes?.status?.on ? '<span class="meet-dot is-rec"></span>' : ""}`, "opens the notes panel"),
+          b("more", "none", this.moreOpen ? true : null, "More", icon("more"), "opens more call options"),
           `<button class="is-leave" data-act="leave" data-tool="meet.leave">Leave</button>`
         ].join("");
         const bar = this.root.querySelector("#bar");
@@ -1223,22 +1884,33 @@ var init_call = __esm({
           return;
         }
         const tab = (k, label) => `<button role="tab" aria-selected="${this.panel === k}" data-tool="none" data-why="switches the side panel" data-panel="${k}">${label}</button>`;
-        const head = `<div class="meet-side-h"><div class="ui-tabs" role="tablist">${tab("people", `People <span class="ui-badge is-quiet">${this.people.filter((p) => p.in_call || p.id === this.me.id).length}</span>`)}${tab("chat", "Chat")}${tab("info", "Details")}</div><button class="ui-x" data-tool="none" data-why="closes the side panel" data-act="close" aria-label="Close">\xD7</button></div>`;
+        const head = `<div class="meet-side-h"><div class="ui-tabs" role="tablist">${tab("people", `People <span class="ui-badge is-quiet">${this.people.filter((p) => p.in_call || p.id === this.me.id).length}</span>`)}${tab("chat", "Chat")}${tab("notes", "Notes")}${tab("info", "Details")}</div><button class="ui-x" data-tool="none" data-why="closes the side panel" data-act="close" aria-label="Close">\xD7</button></div>`;
         let body = "";
         if (this.panel === "people") body = this.peopleHtml();
         if (this.panel === "chat") body = this.chatHtml();
         if (this.panel === "info") body = this.infoHtml();
+        if (this.panel === "notes") body = this.notes?.panelHtml() ?? '<p class="ui-empty">Loading notes\u2026</p>';
         const html = head + `<div class="meet-side-b">${body}</div>`;
         if (side.dataset.html === html) return;
-        const draft = side.querySelector("#chatbox")?.value;
-        const focused = document.activeElement?.id === "chatbox";
+        const drafts = [...side.querySelectorAll("input[id]")].map((i) => [i.id, i.value]);
+        const focused = document.activeElement?.closest?.("#side") ? document.activeElement.id : null;
+        const scroll = side.querySelector(".meet-side-b")?.scrollTop ?? 0;
+        const atEnd = (() => {
+          const b = side.querySelector(".meet-side-b");
+          return !b || b.scrollTop + b.clientHeight >= b.scrollHeight - 8;
+        })();
         side.innerHTML = html;
         side.dataset.html = html;
-        const box = side.querySelector("#chatbox");
-        if (box && draft) box.value = draft;
-        if (box && focused) box.focus();
+        for (const [id, v] of drafts) {
+          const i = side.querySelector(`#${id}`);
+          if (i && v) i.value = v;
+        }
+        if (focused) side.querySelector(`#${focused}`)?.focus();
         const list = side.querySelector(".meet-chatlist");
         if (list) list.scrollTop = list.scrollHeight;
+        const sb = side.querySelector(".meet-side-b");
+        if (sb) sb.scrollTop = this.panel === "notes" && atEnd && this.panelWas === "notes" ? sb.scrollHeight : scroll;
+        this.panelWas = this.panel;
       }
       peopleHtml() {
         const host = this.amHost();
@@ -1254,12 +1926,12 @@ var init_call = __esm({
       </div>` : "";
           return `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(p.display_name))}</span><div class="meet-prow-m"><span>${esc(p.display_name)}${mine ? " (you)" : ""}</span><span class="meet-prow-c">${chips.map((c) => `<span class="ui-chip is-outline">${c}</span>`).join("")}${p.hand_raised ? `<span class="ui-chip is-soft">${icon("hand", 12)} Hand up</span>` : ""}</span></div><span class="meet-prow-i ${p.audio_on ? "" : "is-off"}" title="${p.audio_on ? "Mic on" : "Muted"}">${icon(p.audio_on ? "mic" : "mic-off", 16)}</span>${acts}</li>`;
         };
-        const waiting = host && this.waitingList?.length ? `<h3 class="meet-side-sub">Waiting <span class="ui-badge">${this.waitingList.length}</span></h3><ul class="meet-plist">${this.waitingList.map((w) => `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(w.display_name))}</span><div class="meet-prow-m"><span>${esc(w.display_name)}</span><span class="meet-prow-c">${w.is_guest ? '<span class="ui-chip is-outline">Guest</span>' : ""}</span></div><div class="meet-prow-a is-on"><button class="ui-btn is-sm" data-tool="meet.admit" data-act="admit" data-pid="${w.id}">Let in</button><button class="ui-btn is-ghost is-sm" data-tool="meet.deny" data-act="deny" data-pid="${w.id}">Deny</button></div></li>`).join("")}</ul><p><button class="ui-btn is-quiet is-sm" data-tool="meet.admit" data-act="admit-all">Let everyone in</button></p>` : "";
+        const waiting2 = host && this.waitingList?.length ? `<h3 class="meet-side-sub">Waiting <span class="ui-badge">${this.waitingList.length}</span></h3><ul class="meet-plist">${this.waitingList.map((w) => `<li class="meet-prow"><span class="ui-avatar is-sm">${esc(initials(w.display_name))}</span><div class="meet-prow-m"><span>${esc(w.display_name)}</span><span class="meet-prow-c">${w.is_guest ? '<span class="ui-chip is-outline">Guest</span>' : ""}</span></div><div class="meet-prow-a is-on"><button class="ui-btn is-sm" data-tool="meet.admit" data-act="admit" data-pid="${w.id}">Let in</button><button class="ui-btn is-ghost is-sm" data-tool="meet.deny" data-act="deny" data-pid="${w.id}">Deny</button></div></li>`).join("")}</ul><p><button class="ui-btn is-quiet is-sm" data-tool="meet.admit" data-act="admit-all">Let everyone in</button></p>` : "";
         const rank = (p) => !webinar ? 0 : p.role !== "viewer" ? 0 : p.hand_raised ? 1 : 2;
         const inCall = this.people.filter((p) => p.in_call || p.id === this.me.id).sort((a, b) => rank(a) - rank(b));
         const away = this.people.filter((p) => !p.in_call && p.id !== this.me.id);
         const all = host ? `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.mute_participant" data-act="mute-all">Mute everyone</button><button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button></p>` : `<p class="meet-side-a"><button class="ui-btn is-quiet is-sm" data-tool="meet.invite" data-act="invite">Copy invite</button></p>`;
-        return `${waiting}${all}<h3 class="meet-side-sub">In the call</h3><ul class="meet-plist">${inCall.map(row).join("")}</ul>${away.length ? `<h3 class="meet-side-sub">Joined earlier</h3><ul class="meet-plist">${away.map(row).join("")}</ul>` : ""}`;
+        return `${waiting2}${all}<h3 class="meet-side-sub">In the call</h3><ul class="meet-plist">${inCall.map(row).join("")}</ul>${away.length ? `<h3 class="meet-side-sub">Joined earlier</h3><ul class="meet-plist">${away.map(row).join("")}</ul>` : ""}`;
       }
       chatHtml() {
         const msgs = this.chat.map((m) => `<li class="meet-cmsg ${m.participant === this.me.id ? "is-mine" : ""}"><span class="meet-cmsg-h"><b>${esc(m.name)}</b> <span class="ui-mute">${new Date(m.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></span><span class="meet-cmsg-b">${linkify(esc(m.body))}</span></li>`).join("");
@@ -1308,7 +1980,12 @@ var init_call = __esm({
             this.render();
             await callTool("meet.set_layout", { meeting: this.meeting.id, layout: this.layout });
           }
-          if (a === "people" || a === "chat" || a === "info") this.openPanel(this.panel === a ? null : a);
+          if (a === "people" || a === "chat" || a === "info" || a === "notes") this.openPanel(this.panel === a ? null : a);
+          if (a === "more") {
+            this.moreOpen = !this.moreOpen;
+            this.renderMore();
+            this.render();
+          }
           if (a === "leave") await this.leave();
         } catch (err) {
           toast(err.message);
@@ -1331,6 +2008,14 @@ var init_call = __esm({
         if (!b) return;
         const a = b.dataset.act, pid = b.dataset.pid, mid = this.meeting.id;
         try {
+          if (/^(notes-|send-|captions$)/.test(a)) {
+            b.disabled = true;
+            try {
+              return await this.notes?.onAct(a, b);
+            } finally {
+              b.disabled = false;
+            }
+          }
           if (a === "close") return this.openPanel(null);
           if (a === "admit") await callTool("meet.admit", { meeting: mid, participant: pid });
           if (a === "admit-all") await callTool("meet.admit", { meeting: mid, all: true });
@@ -1370,6 +2055,19 @@ var init_call = __esm({
         }
       }
       async onSideSubmit(e) {
+        if (e.target.dataset.act?.startsWith("send-")) {
+          e.preventDefault();
+          const btn = e.target.querySelector("button[type=submit]");
+          if (btn) btn.disabled = true;
+          try {
+            await this.notes?.onSubmit(e.target);
+          } catch (err) {
+            toast(err.message);
+          } finally {
+            if (btn) btn.disabled = false;
+          }
+          return;
+        }
         if (e.target.id !== "chatform") return;
         e.preventDefault();
         const box = e.target.querySelector("#chatbox");
@@ -1394,6 +2092,53 @@ var init_call = __esm({
         }
         if (b.dataset.act === "admit-all") await callTool("meet.admit", { meeting: this.meeting.id, all: true }).catch((err) => toast(err.message));
         if (b.dataset.act === "see-waiting") this.openPanel("people");
+      }
+      // What everyone must be able to see while it is happening: notes on, recording.
+      markers() {
+        return [this.notes?.marker() ?? "", this.recMarker?.() ?? ""].join("");
+      }
+      renderCaptions() {
+        const el = this.root.querySelector("#captions");
+        if (!el) return;
+        const html = this.notes?.captionsHtml() ?? "";
+        if (el.innerHTML !== html) el.innerHTML = html;
+      }
+      // The More menu: things used less often, and on a phone the ones the bar has no room for.
+      moreItems() {
+        const me = this.people.find((p) => p.id === this.me.id);
+        const hand = !!me?.hand_raised;
+        const item = (act, tool, label, ic, why = "") => `<button class="meet-more-i" data-act="${act}" ${tool === "none" ? `data-tool="none" data-why="${esc(why)}"` : `data-tool="${tool}"`}>${icon(ic, 18)}<span>${esc(label)}</span></button>`;
+        return [
+          item("hand", "meet.raise_hand", hand ? "Lower hand" : "Raise hand", "hand"),
+          item("layout", "meet.set_layout", this.layout === "grid" ? "Speaker view" : "Grid view", this.layout === "grid" ? "speaker" : "grid"),
+          ...(this.extraMore?.() ?? []).map((x) => item(...x)),
+          item("captions", "none", this.notes?.captions ? "Hide captions" : "Show captions", "captions", "shows or hides captions on this screen only"),
+          item("info", "none", "Call details", "info", "opens call details")
+        ].join("");
+      }
+      renderMore() {
+        const el = this.root.querySelector("#more");
+        if (!el) return;
+        el.hidden = !this.moreOpen;
+        if (this.moreOpen) el.innerHTML = `<div class="meet-more-in" role="menu">${this.moreItems()}</div>`;
+      }
+      async onMore(e) {
+        const b = e.target.closest("button[data-act]");
+        if (e.target === e.currentTarget || b) {
+          this.moreOpen = false;
+          this.renderMore();
+          this.render();
+        }
+        if (!b) return;
+        const a = b.dataset.act;
+        try {
+          if (a === "hand" || a === "layout") return this.onBar({ target: b });
+          if (a === "captions") return this.notes?.onAct("captions");
+          if (a === "info") return this.openPanel("info");
+          await this.onExtra?.(a, b);
+        } catch (err) {
+          toast(err.message);
+        }
       }
       // ------------------------------------------------------------ for tests and the parity report
       view() {
@@ -1492,6 +2237,26 @@ async function homePage() {
         <div class="meet-form-a"><button class="ui-btn is-accent" type="submit" data-tool="meet.schedule">Schedule</button></div>
       </form>
       <div id="doctorout"></div>
+      <details class="ui-card meet-settings" id="settingsbox">
+        <summary class="meet-h3">Notes and recording settings</summary>
+        <form data-tool="meet.set_settings" id="settings">
+          <p class="ui-mute">Optional. Without a model, a labelled script writes demo notes. Keys are stored encrypted and never shown again.</p>
+          <div class="ui-fields">
+            <label class="ui-field is-wide"><span class="ui-label">Notes model address (OpenAI-compatible)</span><input class="ui-input" name="notes_model_url" placeholder="https://api.openai.com/v1 or http://localhost:11434/v1"></label>
+            <label class="ui-field"><span class="ui-label">Model</span><input class="ui-input" name="notes_model" placeholder="gpt-4.1-mini"></label>
+            <label class="ui-field"><span class="ui-label">Key</span><input class="ui-input" name="notes_model_key" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+            <label class="ui-field is-wide"><span class="ui-label">Speech service for devices that cannot transcribe (optional)</span><input class="ui-input" name="transcribe_url" placeholder="https://api.openai.com/v1"></label>
+            <label class="ui-field"><span class="ui-label">Speech model</span><input class="ui-input" name="transcribe_model" placeholder="whisper-1"></label>
+            <label class="ui-field"><span class="ui-label">Speech key</span><input class="ui-input" name="transcribe_key" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+            <label class="ui-field is-wide"><span class="ui-label">Recording storage (S3-compatible address)</span><input class="ui-input" name="s3_endpoint" placeholder="https://<account>.r2.cloudflarestorage.com"></label>
+            <label class="ui-field"><span class="ui-label">Bucket</span><input class="ui-input" name="s3_bucket"></label>
+            <label class="ui-field"><span class="ui-label">Region</span><input class="ui-input" name="s3_region" placeholder="auto"></label>
+            <label class="ui-field"><span class="ui-label">Access key id</span><input class="ui-input" name="s3_access_key_id" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+            <label class="ui-field"><span class="ui-label">Secret access key</span><input class="ui-input" name="s3_secret_access_key" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+          </div>
+          <div class="meet-form-a"><button class="ui-btn is-accent" type="submit" data-tool="meet.set_settings">Save settings</button></div>
+        </form>
+      </details>
     </section>` : ""}
     <section class="meet-section meet-ways">
       ${nav.suite ? "" : '<div class="ui-card"><h3 class="meet-h3">Use it here</h3><p class="ui-mute">Sign in with GitHub and start meetings on this server. Calls of up to 4 people need nothing else.</p></div>'}
@@ -1561,6 +2326,32 @@ async function homePage() {
     e.currentTarget.disabled = false;
   });
   loadMine();
+  loadSettings();
+}
+var SECRET = ["notes_model_key", "transcribe_key", "s3_access_key_id", "s3_secret_access_key"];
+async function loadSettings() {
+  const f = $("settings");
+  if (!f) return;
+  const s = await callTool("meet.get_settings").catch(() => null);
+  if (s) for (const el of f.querySelectorAll("input")) {
+    const v = s[el.name];
+    if (SECRET.includes(el.name)) el.placeholder = v?.set ? v.from === "server" ? "Set on the server" : "Set. Leave empty to keep" : "Not set";
+    else if (v?.value && v.from === "settings") el.value = v.value;
+    else if (v?.value) el.placeholder = `${v.value} (from the server)`;
+  }
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const input = {};
+    for (const el of f.querySelectorAll("input")) if (!SECRET.includes(el.name) || el.value) input[el.name] = el.value;
+    try {
+      await callTool("meet.set_settings", input);
+      toast("Settings saved");
+      for (const k of SECRET) f[k].value = "";
+      loadSettings();
+    } catch (err) {
+      toast(err.message);
+    }
+  };
 }
 async function loadMine() {
   const el = $("mine");
@@ -1598,7 +2389,7 @@ async function loadMine() {
   };
 }
 var ticketKey = (mid) => `meet:ticket:${mid}`;
-var store = {
+var store2 = {
   get(k) {
     try {
       return sessionStorage.getItem(k);
@@ -1623,7 +2414,7 @@ async function joinPage(token) {
   const qs = nav.query();
   if (qs.get("hk")) return hostLinkPage(token, qs.get("hk"));
   let m = await callTool("meet.get", { meeting: token });
-  const saved = store.get(ticketKey(m.id));
+  const saved = store2.get(ticketKey(m.id));
   if (saved) {
     setTicket(saved);
     m = await callTool("meet.get", { meeting: token });
@@ -1631,8 +2422,8 @@ async function joinPage(token) {
   if (m.status === "ended") return endedPage("This meeting has ended.");
   if (m.you?.status === "removed") return endedPage("The host removed you from this meeting.");
   const hostKey = qs.get("host");
-  const name = m.you?.display_name ?? state.who.user?.name ?? store.get("meet:name") ?? "";
-  const prefs = { audio: store.get("meet:audio") !== "0", video: store.get("meet:video") !== "0" };
+  const name = m.you?.display_name ?? state.who.user?.name ?? store2.get("meet:name") ?? "";
+  const prefs = { audio: store2.get("meet:audio") !== "0", video: store2.get("meet:video") !== "0" };
   const viewer = m.kind === "webinar" && !hostKey && !m.you_host && !["speaker", "cohost", "host"].includes(m.you?.role);
   app.innerHTML = `${topBar()}
   <main class="meet-pre ${viewer ? "is-viewer" : ""}">
@@ -1648,6 +2439,7 @@ async function joinPage(token) {
       <p class="ui-label">${m.kind === "webinar" ? "Webinar" : "Meeting"}</p>
       <h1 class="meet-h">${esc(m.title)}</h1>
       <p class="ui-mute">${m.status === "live" ? "Happening now." : m.starts_at ? `Starts ${esc(fmtWhen(m.starts_at))}.` : ""} ${m.waiting_room && !hostKey && !m.you_host ? "The host lets people in." : ""}</p>
+      ${m.notes_on ? '<div class="ui-notice is-quiet meet-join-notice"><span><span class="ui-dot is-bad"></span> Notes are on in this meeting. Before anything you say is written down, you are asked, and you can say no.</span></div>' : ""}
       <label class="ui-field"><span class="ui-label">Your name</span><input class="ui-input" name="name" value="${esc(name)}" required maxlength="60" autocomplete="name" placeholder="Your name"></label>
       <button class="ui-btn is-accent is-lg is-block" type="submit" data-tool="meet.join">${hostKey || m.you_host ? "Start the meeting" : "Join"}</button>
       ${!state.who.user && state.who.signin_available ? `<p class="ui-hint">Have an account? <a href="/auth/github?next=${encodeURIComponent(location.pathname + location.search)}">Sign in with GitHub</a>.</p>` : ""}
@@ -1687,13 +2479,13 @@ async function joinPage(token) {
     if (local.mic) local.mic.enabled = prefs.audio;
     pmic.setAttribute("aria-pressed", prefs.audio);
     pmic.innerHTML = icon(prefs.audio ? "mic" : "mic-off");
-    store.set("meet:audio", prefs.audio ? "1" : "0");
+    store2.set("meet:audio", prefs.audio ? "1" : "0");
   };
   if (pcam) pcam.onclick = async () => {
     prefs.video = !prefs.video;
     pcam.setAttribute("aria-pressed", prefs.video);
     pcam.innerHTML = icon(prefs.video ? "cam" : "cam-off");
-    store.set("meet:video", prefs.video ? "1" : "0");
+    store2.set("meet:video", prefs.video ? "1" : "0");
     $("preview").classList.toggle("is-cam-off", !prefs.video);
     if (!prefs.video && local.cam) {
       local.cam.stop();
@@ -1715,18 +2507,18 @@ async function joinPage(token) {
     const btn = e.currentTarget.querySelector("button[type=submit]");
     btn.disabled = true;
     const nm = new FormData(e.currentTarget).get("name").toString().trim();
-    store.set("meet:name", nm);
+    store2.set("meet:name", nm);
     try {
       let r = await callTool("meet.join", { meeting: m.id, name: nm, ...hostKey ? { host_key: hostKey } : {} });
       setTicket(r.ticket);
-      store.set(ticketKey(m.id), r.ticket);
+      store2.set(ticketKey(m.id), r.ticket);
       if (hostKey) nav.replace(nav.path().split("?")[0]);
       if (r.participant.status === "waiting") r = await waitingRoom(m, r);
       if (!r) return;
       await mediaReady;
       const { Call: Call2 } = await Promise.resolve().then(() => (init_call(), call_exports));
       const call = new Call2({ root: app, meeting: r.meeting, participant: r.participant, media: r.media, local, prefs, onExit: (why) => {
-        store.del(ticketKey(m.id));
+        store2.del(ticketKey(m.id));
         endedPage(why);
       } });
       window.meetCall = call;
@@ -1750,7 +2542,7 @@ async function waitingRoom(m, r) {
     gone = true;
     await callTool("meet.leave", { meeting: m.id }).catch(() => {
     });
-    store.del(ticketKey(m.id));
+    store2.del(ticketKey(m.id));
     nav.go("/");
   };
   for (; ; ) {
@@ -1795,7 +2587,7 @@ init_api();
 init_dom();
 
 // public/app/meet.css
-var meet_default = ".wos-meet{@keyframes meet-pulse{0%{box-shadow:0 0 color-mix(in srgb,var(--ui-accent) 45%,transparent)}to{box-shadow:0 0 0 16px transparent}}}.wos-meet .meet-top{max-width:1200px;margin:0 auto}.wos-meet .meet-top-r{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ui-ink-2)}.wos-meet .meet-brand svg{height:22px;width:22px}.wos-meet .meet-h1{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);letter-spacing:var(--ui-display-track,-.02em);font-size:clamp(30px,5vw,48px);line-height:1.08;margin:0 0 14px}.wos-meet .meet-h{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);font-size:24px;line-height:1.2;margin:0 0 8px}.wos-meet .meet-h2{font-size:17px;font-weight:var(--ui-weight-strong,600);margin:0}.wos-meet .meet-h3{font-size:15px;font-weight:var(--ui-weight-strong,600);margin:0 0 8px}.wos-meet .meet-lead{font-size:17px;color:var(--ui-ink-2);max-width:640px;margin:0 0 24px;line-height:1.55}.wos-meet .meet-home{max-width:960px;margin:0 auto;padding:clamp(24px,6vw,72px) 16px 64px}.wos-meet .meet-hero{margin-bottom:48px}.wos-meet .meet-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.wos-meet .meet-joinform{display:flex;gap:8px;flex:1;min-width:min(100%,320px);max-width:440px}.wos-meet .meet-joinform .ui-input{min-height:42px}.wos-meet .meet-section{margin-top:36px}.wos-meet .meet-section-h{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}.wos-meet .meet-section-a{display:flex;gap:8px}.wos-meet .meet-list{display:grid;gap:8px;margin-bottom:20px}.wos-meet .meet-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:var(--ui-card);border:1px solid var(--ui-card-line);border-radius:var(--ui-radius);flex-wrap:wrap}.wos-meet .meet-row-m{display:grid;gap:2px;min-width:0}.wos-meet .meet-row-m b{font-weight:var(--ui-weight-strong,600)}.wos-meet .meet-row-m .ui-mute{font-size:13.5px}.wos-meet .meet-row-a{display:flex;gap:6px;flex-wrap:wrap}.wos-meet .meet-schedule{margin-top:8px}.wos-meet .meet-form-a{display:flex;justify-content:flex-end}.wos-meet .meet-ways{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wos-meet .meet-ways p{margin:0 0 8px}.wos-meet .meet-ways code,.wos-meet .meet-cmd{font-family:var(--ui-mono,ui-monospace),monospace;font-size:13px}.wos-meet .meet-doctor{margin-top:12px}.wos-meet .meet-checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px}.wos-meet .meet-center{min-height:calc(100svh - 80px);display:grid;place-items:center;padding:16px}.wos-meet .meet-narrow{width:min(520px,100%);padding:28px}.wos-meet .meet-cmd{white-space:pre-wrap;word-break:break-all;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);padding:12px;margin:12px 0}.wos-meet .meet-waiting{text-align:center}.wos-meet .meet-waiting .ui-btn{margin-top:8px}.wos-meet .meet-pulse{display:block;width:14px;height:14px;margin:4px auto 16px;border-radius:50%;background:var(--ui-accent);animation:meet-pulse 1.6s ease-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-pulse{animation:none}}.wos-meet .meet-pre{max-width:1100px;margin:0 auto;padding:clamp(16px,4vw,48px) 16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:clamp(20px,4vw,48px);align-items:center}.wos-meet .meet-preview{width:100%}.wos-meet .meet-preview video{transform:scaleX(-1)}.wos-meet .meet-pre-f .ui-btn.is-block{margin-top:4px}.wos-meet .meet-pre-f .ui-hint{margin-top:12px}.wos-meet .meet-perm{text-align:center;min-height:1em}.wos-meet .ui-tile>.ui-avatar{position:relative;z-index:0}.wos-meet .ui-tile video{opacity:0;transition:opacity var(--ui-dur) var(--ui-ease)}.wos-meet .ui-tile.has-video video,.wos-meet .meet-preview:not(.is-cam-off) video{opacity:1;z-index:1}.wos-meet .ui-tile.has-video>.ui-avatar{visibility:hidden}.wos-meet .ui-tile .ui-tile-n,.wos-meet .ui-tile .ui-tile-tag{z-index:2}.wos-meet .ui-tile.is-mine video{transform:scaleX(-1)}.wos-meet .ui-tile.is-screen video{object-fit:contain;background:#000}.wos-meet .ui-tile.is-trouble{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ui-bad) 60%,transparent)}.wos-meet .ui-callbar button svg{pointer-events:none}.wos-meet .ui-callbar button.is-on{background:var(--ui-accent);color:var(--ui-on-accent);border-color:transparent}.wos-meet .meet-call{height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}.wos-meet .meet-call-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 4px}.wos-meet .meet-call-t{display:flex;align-items:baseline;gap:10px;min-width:0}.wos-meet .meet-call-t b{font-weight:var(--ui-weight-strong,600);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-mode{font-size:13px;white-space:nowrap}.wos-meet .meet-notices{display:grid;gap:6px;padding:0 16px}.wos-meet .meet-notices:not(:empty){padding-top:6px}.wos-meet .meet-notices .ui-notice{align-items:center;flex-wrap:wrap}.wos-meet .meet-notices .ui-notice>span{flex:1;min-width:200px}.wos-meet .meet-body{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;padding:8px 16px 0;gap:12px}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr) 340px}.wos-meet .meet-stage{position:relative;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden;border-radius:var(--ui-radius-lg)}.wos-meet .meet-stage .ui-calls{min-height:0;overflow:auto;align-content:center;justify-content:center}.wos-meet .meet-main:empty{display:none}.wos-meet .meet-stage.has-big{grid-template-rows:minmax(0,1fr) auto}.wos-meet .meet-stage.has-big .meet-main{min-height:0;display:grid;padding:8px;background:color-mix(in srgb,var(--ui-ink) 6%,var(--ui-bg));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0}.wos-meet .meet-stage.has-big .meet-main>.ui-tile{aspect-ratio:auto;height:100%;min-height:0;grid-column:auto}.wos-meet .meet-stage.has-big .meet-main>.ui-tile video{object-fit:contain;background:#000}.wos-meet .ui-calls.is-strip{display:flex;overflow-x:auto;align-content:start;border-radius:0 0 var(--ui-radius-lg) var(--ui-radius-lg)}.wos-meet .ui-calls.is-strip:empty{display:none}.wos-meet .ui-calls.is-strip>.ui-tile{flex:0 0 180px;aspect-ratio:16/10}.wos-meet .meet-tap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5}.wos-meet .meet-bar{padding:10px 16px calc(10px + env(safe-area-inset-bottom))}.wos-meet .meet-bar-sep{width:1px;height:28px;background:var(--ui-line);margin:0 4px}.wos-meet .meet-bar button{position:relative}.wos-meet .meet-dot{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--ui-accent);color:var(--ui-on-accent);font:600 11px/18px var(--ui-font)}.wos-meet .meet-side{min-height:0;display:none;flex-direction:column;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}.wos-meet .meet-side:not(:empty){display:flex}.wos-meet .meet-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 0;border-bottom:1px solid var(--ui-line)}.wos-meet .meet-side-h .ui-tabs{border:0}.wos-meet .meet-side-b{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column}.wos-meet .meet-side-sub{font-size:12px;font-weight:500;color:var(--ui-ink-3);margin:12px 0 6px}.wos-meet .meet-side-sub:first-child{margin-top:0}.wos-meet .meet-side-a{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px}.wos-meet .meet-side-a.is-col{flex-direction:column;align-items:stretch;margin-top:16px}.wos-meet .meet-side-a.is-col .ui-btn{justify-content:flex-start}.wos-meet .meet-plist{list-style:none;margin:0;padding:0;display:grid;gap:2px}.wos-meet .meet-prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 4px;border-radius:var(--ui-radius-sm)}.wos-meet .meet-prow:hover{background:var(--ui-hover)}.wos-meet .meet-prow-m{display:grid;gap:2px;min-width:0;font-size:14px}.wos-meet .meet-prow-m>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-prow-c{display:flex;gap:4px;flex-wrap:wrap}.wos-meet .meet-prow-c:empty{display:none}.wos-meet .meet-prow-i{color:var(--ui-ink-3);display:grid}.wos-meet .meet-prow-i.is-off{color:var(--ui-bad)}.wos-meet .meet-prow-a{grid-column:2/-1;display:none;flex-wrap:wrap;gap:4px}.wos-meet .meet-prow:hover .meet-prow-a,.wos-meet .meet-prow:focus-within .meet-prow-a,.wos-meet .meet-prow-a.is-on{display:flex}@media(hover:none){.wos-meet .meet-prow-a{display:flex}}.wos-meet .meet-chatlist{list-style:none;margin:0;padding:0;flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px}.wos-meet .meet-cmsg{display:grid;gap:2px;font-size:14px}.wos-meet .meet-cmsg-h{font-size:12.5px}.wos-meet .meet-cmsg-b{white-space:pre-wrap;overflow-wrap:anywhere}.wos-meet .meet-composer{margin:10px 0 0}.wos-meet .meet-kv{font-size:13.5px}.wos-meet .meet-link code{font-family:var(--ui-mono,ui-monospace),monospace;font-size:12.5px;word-break:break-all}.wos-meet .meet-hosts{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13.5px}.wos-meet .meet-hosts li{display:flex;gap:6px;align-items:center}.wos-meet .meet-hostcmd{margin-top:12px;font-size:13.5px}@media(max-width:760px){.wos-meet .meet-pre{grid-template-columns:1fr}.wos-meet .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}.wos-meet .meet-ways{grid-template-columns:1fr}.wos-meet .meet-body{padding:6px 8px 0}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}.wos-meet .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}.wos-meet .meet-bar button{width:38px;height:38px;flex:none}.wos-meet .meet-bar [data-act=info],.wos-meet .meet-bar-sep{display:none}.wos-meet .meet-bar button.is-leave{width:auto;padding:0 14px}.wos-meet .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}.wos-meet .meet-mode{display:none}}\n";
+var meet_default = ".wos-meet{@keyframes meet-pulse{0%{box-shadow:0 0 color-mix(in srgb,var(--ui-accent) 45%,transparent)}to{box-shadow:0 0 0 16px transparent}}@keyframes meet-blink{50%{opacity:.35}}}.wos-meet .meet-top{max-width:1200px;margin:0 auto}.wos-meet .meet-top-r{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ui-ink-2)}.wos-meet .meet-brand svg{height:22px;width:22px}.wos-meet .meet-h1{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);letter-spacing:var(--ui-display-track,-.02em);font-size:clamp(30px,5vw,48px);line-height:1.08;margin:0 0 14px}.wos-meet .meet-h{font-family:var(--ui-display);font-weight:var(--ui-display-weight,600);font-size:24px;line-height:1.2;margin:0 0 8px}.wos-meet .meet-h2{font-size:17px;font-weight:var(--ui-weight-strong,600);margin:0}.wos-meet .meet-h3{font-size:15px;font-weight:var(--ui-weight-strong,600);margin:0 0 8px}.wos-meet .meet-lead{font-size:17px;color:var(--ui-ink-2);max-width:640px;margin:0 0 24px;line-height:1.55}.wos-meet .meet-home{max-width:960px;margin:0 auto;padding:clamp(24px,6vw,72px) 16px 64px}.wos-meet .meet-hero{margin-bottom:48px}.wos-meet .meet-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.wos-meet .meet-joinform{display:flex;gap:8px;flex:1;min-width:min(100%,320px);max-width:440px}.wos-meet .meet-joinform .ui-input{min-height:42px}.wos-meet .meet-section{margin-top:36px}.wos-meet .meet-section-h{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}.wos-meet .meet-section-a{display:flex;gap:8px}.wos-meet .meet-list{display:grid;gap:8px;margin-bottom:20px}.wos-meet .meet-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:var(--ui-card);border:1px solid var(--ui-card-line);border-radius:var(--ui-radius);flex-wrap:wrap}.wos-meet .meet-row-m{display:grid;gap:2px;min-width:0}.wos-meet .meet-row-m b{font-weight:var(--ui-weight-strong,600)}.wos-meet .meet-row-m .ui-mute{font-size:13.5px}.wos-meet .meet-row-a{display:flex;gap:6px;flex-wrap:wrap}.wos-meet .meet-schedule{margin-top:8px}.wos-meet .meet-form-a{display:flex;justify-content:flex-end}.wos-meet .meet-ways{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wos-meet .meet-ways p{margin:0 0 8px}.wos-meet .meet-ways code,.wos-meet .meet-cmd{font-family:var(--ui-mono,ui-monospace),monospace;font-size:13px}.wos-meet .meet-doctor{margin-top:12px}.wos-meet .meet-checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;font-size:14px}.wos-meet .meet-center{min-height:calc(100svh - 80px);display:grid;place-items:center;padding:16px}.wos-meet .meet-narrow{width:min(520px,100%);padding:28px}.wos-meet .meet-cmd{white-space:pre-wrap;word-break:break-all;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);padding:12px;margin:12px 0}.wos-meet .meet-waiting{text-align:center}.wos-meet .meet-waiting .ui-btn{margin-top:8px}.wos-meet .meet-pulse{display:block;width:14px;height:14px;margin:4px auto 16px;border-radius:50%;background:var(--ui-accent);animation:meet-pulse 1.6s ease-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-pulse{animation:none}}.wos-meet .meet-pre{max-width:1100px;margin:0 auto;padding:clamp(16px,4vw,48px) 16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:clamp(20px,4vw,48px);align-items:center}.wos-meet .meet-preview{width:100%}.wos-meet .meet-preview video{transform:scaleX(-1)}.wos-meet .meet-pre-f .ui-btn.is-block{margin-top:4px}.wos-meet .meet-pre-f .ui-hint{margin-top:12px}.wos-meet .meet-perm{text-align:center;min-height:1em}.wos-meet .ui-tile>.ui-avatar{position:relative;z-index:0}.wos-meet .ui-tile video{opacity:0;transition:opacity var(--ui-dur) var(--ui-ease)}.wos-meet .ui-tile.has-video video,.wos-meet .meet-preview:not(.is-cam-off) video{opacity:1;z-index:1}.wos-meet .ui-tile.has-video>.ui-avatar{visibility:hidden}.wos-meet .ui-tile .ui-tile-n,.wos-meet .ui-tile .ui-tile-tag{z-index:2}.wos-meet .ui-tile.is-mine video{transform:scaleX(-1)}.wos-meet .ui-tile.is-screen video{object-fit:contain;background:#000}.wos-meet .ui-tile.is-trouble{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ui-bad) 60%,transparent)}.wos-meet .ui-callbar button svg{pointer-events:none}.wos-meet .ui-callbar button.is-on{background:var(--ui-accent);color:var(--ui-on-accent);border-color:transparent}.wos-meet .meet-call{height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}.wos-meet .meet-call-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 4px}.wos-meet .meet-call-t{display:flex;align-items:baseline;gap:10px;min-width:0}.wos-meet .meet-call-t b{font-weight:var(--ui-weight-strong,600);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-mode{font-size:13px;white-space:nowrap}.wos-meet .meet-notices{display:grid;gap:6px;padding:0 16px}.wos-meet .meet-notices:not(:empty){padding-top:6px}.wos-meet .meet-notices .ui-notice{align-items:center;flex-wrap:wrap}.wos-meet .meet-notices .ui-notice>span{flex:1;min-width:200px}.wos-meet .meet-body{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;padding:8px 16px 0;gap:12px}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr) 340px}.wos-meet .meet-stage{position:relative;min-height:0;display:grid;grid-template-rows:minmax(0,1fr);overflow:hidden;border-radius:var(--ui-radius-lg)}.wos-meet .meet-stage .ui-calls{min-height:0;overflow:auto;align-content:center;justify-content:center}.wos-meet .meet-main:empty{display:none}.wos-meet .meet-stage.has-big{grid-template-rows:minmax(0,1fr) auto}.wos-meet .meet-stage.has-big .meet-main{min-height:0;display:grid;padding:8px;background:color-mix(in srgb,var(--ui-ink) 6%,var(--ui-bg));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0}.wos-meet .meet-stage.has-big .meet-main>.ui-tile{aspect-ratio:auto;height:100%;min-height:0;grid-column:auto}.wos-meet .meet-stage.has-big .meet-main>.ui-tile video{object-fit:contain;background:#000}.wos-meet .ui-calls.is-strip{display:flex;overflow-x:auto;align-content:start;border-radius:0 0 var(--ui-radius-lg) var(--ui-radius-lg)}.wos-meet .ui-calls.is-strip:empty{display:none}.wos-meet .ui-calls.is-strip>.ui-tile{flex:0 0 180px;aspect-ratio:16/10}.wos-meet .meet-tap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5}.wos-meet .meet-bar{padding:10px 16px calc(10px + env(safe-area-inset-bottom))}.wos-meet .meet-bar-sep{width:1px;height:28px;background:var(--ui-line);margin:0 4px}.wos-meet .meet-bar button{position:relative}.wos-meet .meet-dot{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--ui-accent);color:var(--ui-on-accent);font:600 11px/18px var(--ui-font)}.wos-meet .meet-side{min-height:0;display:none;flex-direction:column;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius-lg);overflow:hidden}.wos-meet .meet-side:not(:empty){display:flex}.wos-meet .meet-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 0;border-bottom:1px solid var(--ui-line)}.wos-meet .meet-side-h .ui-tabs{border:0}.wos-meet .meet-side-b{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column}.wos-meet .meet-side-sub{font-size:12px;font-weight:500;color:var(--ui-ink-3);margin:12px 0 6px}.wos-meet .meet-side-sub:first-child{margin-top:0}.wos-meet .meet-side-a{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px}.wos-meet .meet-side-a.is-col{flex-direction:column;align-items:stretch;margin-top:16px}.wos-meet .meet-side-a.is-col .ui-btn{justify-content:flex-start}.wos-meet .meet-plist{list-style:none;margin:0;padding:0;display:grid;gap:2px}.wos-meet .meet-prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 4px;border-radius:var(--ui-radius-sm)}.wos-meet .meet-prow:hover{background:var(--ui-hover)}.wos-meet .meet-prow-m{display:grid;gap:2px;min-width:0;font-size:14px}.wos-meet .meet-prow-m>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wos-meet .meet-prow-c{display:flex;gap:4px;flex-wrap:wrap}.wos-meet .meet-prow-c:empty{display:none}.wos-meet .meet-prow-i{color:var(--ui-ink-3);display:grid}.wos-meet .meet-prow-i.is-off{color:var(--ui-bad)}.wos-meet .meet-prow-a{grid-column:2/-1;display:none;flex-wrap:wrap;gap:4px}.wos-meet .meet-prow:hover .meet-prow-a,.wos-meet .meet-prow:focus-within .meet-prow-a,.wos-meet .meet-prow-a.is-on{display:flex}@media(hover:none){.wos-meet .meet-prow-a{display:flex}}.wos-meet .meet-chatlist{list-style:none;margin:0;padding:0;flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px}.wos-meet .meet-cmsg{display:grid;gap:2px;font-size:14px}.wos-meet .meet-cmsg-h{font-size:12.5px}.wos-meet .meet-cmsg-b{white-space:pre-wrap;overflow-wrap:anywhere}.wos-meet .meet-composer{margin:10px 0 0}.wos-meet .meet-kv{font-size:13.5px}.wos-meet .meet-link code{font-family:var(--ui-mono,ui-monospace),monospace;font-size:12.5px;word-break:break-all}.wos-meet .meet-hosts{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13.5px}.wos-meet .meet-hosts li{display:flex;gap:6px;align-items:center}.wos-meet .meet-hostcmd{margin-top:12px;font-size:13.5px}.wos-meet .meet-call-tr{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.wos-meet .meet-notes-on .ui-dot,.wos-meet .meet-rec-on .ui-dot{animation:meet-blink 1.6s ease-in-out infinite}@media(prefers-reduced-motion:reduce){.wos-meet .meet-notes-on .ui-dot,.wos-meet .meet-rec-on .ui-dot{animation:none}}.wos-meet .meet-dot.is-rec{min-width:9px;width:9px;height:9px;padding:0;top:2px;right:2px;background:var(--ui-bad)}.wos-meet .meet-cap{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none;z-index:4;padding:0 12px}.wos-meet .meet-cap:empty{display:none}.wos-meet .meet-captions{max-width:min(760px,100%);display:grid;gap:2px;padding:8px 14px;border-radius:var(--ui-radius);background:color-mix(in srgb,#000 72%,transparent);color:#fff;font-size:15px;line-height:1.45}.wos-meet .meet-captions p{margin:0}.wos-meet .meet-captions b{font-weight:var(--ui-weight-strong,600);margin-right:6px;color:color-mix(in srgb,#fff 78%,var(--ui-accent))}.wos-meet .meet-stage.has-big .meet-cap{bottom:132px}.wos-meet .meet-more{position:fixed;inset:0;z-index:30}.wos-meet .meet-more-in{position:absolute;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));min-width:220px;display:grid;padding:6px;background:var(--ui-surface);border:1px solid var(--ui-line-2);border-radius:var(--ui-radius-lg);box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-more-i{display:flex;align-items:center;gap:10px;padding:9px 10px;font:inherit;font-size:14px;color:var(--ui-ink);background:none;border:0;border-radius:var(--ui-radius-sm);cursor:pointer;text-align:left}.wos-meet .meet-more-i:hover,.wos-meet .meet-more-i:focus-visible{background:var(--ui-hover)}.wos-meet .meet-more-i svg{color:var(--ui-ink-2);flex:none}.wos-meet .meet-notes-h{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-bottom:10px}.wos-meet .meet-notes-h .ui-dot{margin-top:6px}.wos-meet .meet-notes-me{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:14px}.wos-meet .meet-nrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px;font-size:14px}.wos-meet .meet-transcript{list-style:none;margin:0;padding:0;display:grid;gap:10px;font-size:14px}.wos-meet .meet-transcript li{display:grid;gap:1px}.wos-meet .meet-tr-h{font-size:12.5px}.wos-meet .meet-notes-b{font-size:14px;line-height:1.5;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:var(--ui-radius);padding:10px 12px;margin-bottom:8px}.wos-meet .meet-notes-b p{margin:0 0 6px}.wos-meet .meet-notes-b ul{margin:0 0 8px;padding-left:18px}.wos-meet .meet-send{display:grid;gap:6px}.wos-meet .meet-send form{display:flex;gap:6px}.wos-meet .meet-send .ui-input{min-width:0;flex:1}.wos-meet .meet-send p{margin:0}.wos-meet .meet-dlg p{margin:0 0 10px;line-height:1.5}.wos-meet .meet-join-notice{margin-bottom:12px}.wos-meet .meet-settings{margin-top:12px}.wos-meet .meet-settings summary{cursor:pointer;margin:0}.wos-meet .meet-settings form{margin-top:12px}@media(max-width:760px){.wos-meet .meet-pre{grid-template-columns:1fr}.wos-meet .meet-pre.is-viewer .meet-preview{aspect-ratio:16/9}.wos-meet .meet-ways{grid-template-columns:1fr}.wos-meet .meet-body{padding:6px 8px 0}.wos-meet .meet-call[data-panel=people] .meet-body,.wos-meet .meet-call[data-panel=chat] .meet-body,.wos-meet .meet-call[data-panel=info] .meet-body{grid-template-columns:minmax(0,1fr)}.wos-meet .meet-side{position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom));z-index:20;height:min(64svh,calc(100svh - 140px));border-radius:var(--ui-radius-lg) var(--ui-radius-lg) 0 0;box-shadow:var(--ui-shadow-lg)}.wos-meet .meet-bar{gap:5px;padding-left:8px;padding-right:8px;flex-wrap:nowrap}.wos-meet .meet-bar button{width:38px;height:38px;flex:none}.wos-meet .meet-bar [data-act=info],.wos-meet .meet-bar .meet-hide-sm{display:none}.wos-meet .meet-more-in{left:8px;right:8px}.wos-meet .meet-cap{bottom:8px}.wos-meet .meet-captions{font-size:14px}.wos-meet .meet-bar-sep{display:none}.wos-meet .meet-bar button.is-leave{width:auto;padding:0 14px}.wos-meet .ui-calls.is-strip>.ui-tile{flex-basis:120px;aspect-ratio:3/4}.wos-meet .meet-mode{display:none}}\n";
 
 // screens/index.mjs
 var BASE = "/a/meet";

@@ -88,6 +88,26 @@ async function homePage() {
         <div class="meet-form-a"><button class="ui-btn is-accent" type="submit" data-tool="meet.schedule">Schedule</button></div>
       </form>
       <div id="doctorout"></div>
+      <details class="ui-card meet-settings" id="settingsbox">
+        <summary class="meet-h3">Notes and recording settings</summary>
+        <form data-tool="meet.set_settings" id="settings">
+          <p class="ui-mute">Optional. Without a model, a labelled script writes demo notes. Keys are stored encrypted and never shown again.</p>
+          <div class="ui-fields">
+            <label class="ui-field is-wide"><span class="ui-label">Notes model address (OpenAI-compatible)</span><input class="ui-input" name="notes_model_url" placeholder="https://api.openai.com/v1 or http://localhost:11434/v1"></label>
+            <label class="ui-field"><span class="ui-label">Model</span><input class="ui-input" name="notes_model" placeholder="gpt-4.1-mini"></label>
+            <label class="ui-field"><span class="ui-label">Key</span><input class="ui-input" name="notes_model_key" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+            <label class="ui-field is-wide"><span class="ui-label">Speech service for devices that cannot transcribe (optional)</span><input class="ui-input" name="transcribe_url" placeholder="https://api.openai.com/v1"></label>
+            <label class="ui-field"><span class="ui-label">Speech model</span><input class="ui-input" name="transcribe_model" placeholder="whisper-1"></label>
+            <label class="ui-field"><span class="ui-label">Speech key</span><input class="ui-input" name="transcribe_key" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+            <label class="ui-field is-wide"><span class="ui-label">Recording storage (S3-compatible address)</span><input class="ui-input" name="s3_endpoint" placeholder="https://<account>.r2.cloudflarestorage.com"></label>
+            <label class="ui-field"><span class="ui-label">Bucket</span><input class="ui-input" name="s3_bucket"></label>
+            <label class="ui-field"><span class="ui-label">Region</span><input class="ui-input" name="s3_region" placeholder="auto"></label>
+            <label class="ui-field"><span class="ui-label">Access key id</span><input class="ui-input" name="s3_access_key_id" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+            <label class="ui-field"><span class="ui-label">Secret access key</span><input class="ui-input" name="s3_secret_access_key" type="password" autocomplete="off" placeholder="Leave empty to keep"></label>
+          </div>
+          <div class="meet-form-a"><button class="ui-btn is-accent" type="submit" data-tool="meet.set_settings">Save settings</button></div>
+        </form>
+      </details>
     </section>` : ''}
     <section class="meet-section meet-ways">
       ${nav.suite ? '' : '<div class="ui-card"><h3 class="meet-h3">Use it here</h3><p class="ui-mute">Sign in with GitHub and start meetings on this server. Calls of up to 4 people need nothing else.</p></div>'}
@@ -146,6 +166,28 @@ async function homePage() {
     e.currentTarget.disabled = false;
   });
   loadMine();
+  loadSettings();
+}
+
+// Settings: plain values show; keys only say whether they are set. An empty key field keeps the key.
+const SECRET = ['notes_model_key', 'transcribe_key', 's3_access_key_id', 's3_secret_access_key'];
+async function loadSettings() {
+  const f = $('settings');
+  if (!f) return;
+  const s = await callTool('meet.get_settings').catch(() => null);
+  if (s) for (const el of f.querySelectorAll('input')) {
+    const v = s[el.name];
+    if (SECRET.includes(el.name)) el.placeholder = v?.set ? (v.from === 'server' ? 'Set on the server' : 'Set. Leave empty to keep') : 'Not set';
+    else if (v?.value && v.from === 'settings') el.value = v.value;
+    else if (v?.value) el.placeholder = `${v.value} (from the server)`;
+  }
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const input = {};
+    for (const el of f.querySelectorAll('input')) if (!SECRET.includes(el.name) || el.value) input[el.name] = el.value;
+    try { await callTool('meet.set_settings', input); toast('Settings saved'); for (const k of SECRET) f[k].value = ''; loadSettings(); }
+    catch (err) { toast(err.message); }
+  };
 }
 
 async function loadMine() {
@@ -209,6 +251,7 @@ async function joinPage(token) {
       <p class="ui-label">${m.kind === 'webinar' ? 'Webinar' : 'Meeting'}</p>
       <h1 class="meet-h">${esc(m.title)}</h1>
       <p class="ui-mute">${m.status === 'live' ? 'Happening now.' : m.starts_at ? `Starts ${esc(fmtWhen(m.starts_at))}.` : ''} ${m.waiting_room && !hostKey && !m.you_host ? 'The host lets people in.' : ''}</p>
+      ${m.notes_on ? '<div class="ui-notice is-quiet meet-join-notice"><span><span class="ui-dot is-bad"></span> Notes are on in this meeting. Before anything you say is written down, you are asked, and you can say no.</span></div>' : ''}
       <label class="ui-field"><span class="ui-label">Your name</span><input class="ui-input" name="name" value="${esc(name)}" required maxlength="60" autocomplete="name" placeholder="Your name"></label>
       <button class="ui-btn is-accent is-lg is-block" type="submit" data-tool="meet.join">${hostKey || m.you_host ? 'Start the meeting' : 'Join'}</button>
       ${!state.who.user && state.who.signin_available ? `<p class="ui-hint">Have an account? <a href="/auth/github?next=${encodeURIComponent(location.pathname + location.search)}">Sign in with GitHub</a>.</p>` : ''}

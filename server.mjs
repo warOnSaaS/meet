@@ -14,9 +14,12 @@ import { tools } from './server/tools/meet.mjs';
 import { loadConfig } from './server/config.mjs';
 import { createApp } from './server/http.mjs';
 import { migrate } from './server/db.mjs';
+import { FIELDS } from './server/settings.mjs';
+
+const SETTINGS_ENV = Object.values(FIELDS).map((f) => f.env);
 
 // Columns that are BIGINT on Postgres. The suite's driver returns them as strings; meet's code wants numbers.
-const NUMERIC = new Set(['id', 'n', 'm', 'version', 'created_at', 'starts_at', 'ends_at', 'started_at', 'ended_at', 'asked_at', 'joined_at', 'left_at', 'last_seen', 'updated_at', 'done_at', 'applied_at', 'answered_at', 'notice_shown_at', 'duration_min', 'duration_s']);
+const NUMERIC = new Set(['id', 'n', 'm', 'version', 'created_at', 'starts_at', 'ends_at', 'started_at', 'ended_at', 'asked_at', 'joined_at', 'left_at', 'last_seen', 'updated_at', 'done_at', 'applied_at', 'answered_at', 'notice_shown_at', 'duration_min', 'duration_s', 'start_at', 'end_at', 'notes_on', 'notes_started_at', 'written_at', 'scripted', 'size_bytes', 'stopped_at', 'is_open']);
 const numbers = (row) => {
   if (!row) return row;
   for (const k of Object.keys(row)) if (NUMERIC.has(k) && typeof row[k] === 'string' && /^-?\d{1,16}$/.test(row[k])) row[k] = Number(row[k]);
@@ -57,14 +60,14 @@ export default async function register(ctx) {
   const db = adaptDb(ctx.db);
   await migrate(db);
   const env = {};
-  for (const k of ['SESSION_SECRET', 'TURN_URLS', 'TURN_SECRET', 'TURN_USERNAME', 'TURN_CREDENTIAL', 'STUN_URLS', 'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'P2P_MAX']) {
+  for (const k of ['SESSION_SECRET', 'TURN_URLS', 'TURN_SECRET', 'TURN_USERNAME', 'TURN_CREDENTIAL', 'STUN_URLS', 'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'P2P_MAX', ...SETTINGS_ENV]) {
     const v = ctx.env(k);
     if (v) env[k] = v;
   }
   env.SESSION_SECRET ||= await sharedSecret(db);
   const base = `${String(ctx.publicUrl ?? '').replace(/\/$/, '')}/a/meet`;
   // serverless: no WebSocket for signalling, browsers long-poll (the suite never hands an app a socket).
-  const config = { ...loadConfig(env), publicUrl: base, serverless: true, ...(ctx.config ?? {}) };
+  const config = { ...loadConfig(env), publicUrl: base, serverless: true, env, ...(ctx.config ?? {}) };
   const media = createApp({ db, config });
   const room = media.room;
 
@@ -74,7 +77,9 @@ export default async function register(ctx) {
       const person = call.actor?.kind === 'person' || call.actor?.personId;
       const uid = call.actor?.personId ?? call.actor?.id;
       const user = uid && call.actor?.kind !== 'system' ? { id: uid, name: call.actor.name ?? 'Someone', github_login: null, avatar_url: null, agent: !person } : null;
-      const out = await t.handler({ db, config, room, base, teamId: call.team?.id || null, caller: { user, ticket: null } }, input ?? {});
+      // Other apps' tools (CRM, board, Chat, Email) as the same caller, with their scopes and audit.
+      const callTool = call.callTool ? (name, i) => call.callTool(name, i) : undefined;
+      const out = await t.handler({ db, config, room, base, teamId: call.team?.id || null, caller: { user, ticket: null }, callTool }, input ?? {});
       if (t.events?.length === 1) call.emit?.(t.events[0], { meeting: out?.id ?? out?.meeting?.id ?? input?.meeting ?? null });
       return out;
     };
@@ -96,6 +101,9 @@ export default async function register(ctx) {
         delete m.e2ee_key;
         m.participants = await db.all('SELECT * FROM meeting_participants WHERE meeting_id = ?', [m.id]);
         m.chat = await db.all('SELECT * FROM meeting_chat WHERE meeting_id = ? ORDER BY id', [m.id]);
+        m.transcript = await db.all('SELECT * FROM meet_segments WHERE meeting_id = ? ORDER BY start_at', [m.id]);
+        m.notes = await db.get('SELECT * FROM meeting_notes WHERE meeting_id = ?', [m.id]);
+        m.notes_consents = await db.all('SELECT * FROM meet_notes_consents WHERE meeting_id = ?', [m.id]);
       }
       return { meetings };
     },

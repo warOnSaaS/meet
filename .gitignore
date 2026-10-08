@@ -9,3 +9,4 @@ data/
 .vercel
 test-results/
 !.env.example
+test/.cache

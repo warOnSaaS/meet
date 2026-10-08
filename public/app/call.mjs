@@ -7,6 +7,7 @@
 import { callTool, mediaJoin, getTicket, getMediaBase } from './api.mjs';
 import { Signal } from './signal.mjs';
 import { esc, icon, toast, initials, copyText } from './dom.mjs';
+import { Notes } from './notes.mjs';
 
 const SPEAK_LEVEL = 0.03;
 // Webinar viewers hear and see speakers this much later (a receive buffer, 1 to 3 s as decided): smoother
@@ -53,6 +54,9 @@ export class Call {
     this.signal.start();
     if (j.plan) await this.applyPlan(j.plan);
     await Promise.all([this.loadPeople(), this.loadChat(), this.loadStatus()]);
+    // AI notes and the call's encrypted channel (captions, whiteboard).
+    this.notes = new Notes(this);
+    await this.notes.init().catch((e) => console.warn('[meet] notes', e.message));
     this.levelT = setInterval(() => this.pollLevels(), 250);
     this.statT = setInterval(() => this.refreshTrouble(), 3000);
     window.addEventListener('pagehide', this.onHide = () => { navigator.sendBeacon?.(`${getMediaBase()}/leave?token=` + encodeURIComponent(j.token)); });
@@ -61,6 +65,7 @@ export class Call {
 
   async stopMedia() {
     clearInterval(this.levelT); clearInterval(this.statT);
+    this.notes?.stop();
     if (this.onHide) window.removeEventListener('pagehide', this.onHide);
     this.ro?.disconnect();
     await this.engine?.stop().catch(() => {});
@@ -148,6 +153,7 @@ export class Call {
     }
     track.onmute = track.onunmute = () => this.render();
     if (!this.timings.firstRemote) this.timings.firstRemote = performance.now();
+    if (track.kind === 'audio') this.notes?.reconcile().catch(() => {});
     this.render();
   }
 
@@ -256,6 +262,7 @@ export class Call {
       if (b.what === 'participants' || b.what === 'waiting') this.loadPeople();
       if (b.what === 'chat') this.loadChat();
       if (b.what === 'meeting') this.loadStatus();
+      if (b.what === 'notes' || (b.what === 'participants' && this.notes?.status?.on)) this.notes?.load();
     }, 60);
   }
 
@@ -283,6 +290,7 @@ export class Call {
     this.audioOn = on;
     if (this.local.mic) this.local.mic.enabled = on;
     if (!fromServer) await callTool('meet.set_my_media', { meeting: this.meeting.id, audio: on }).catch((e) => toast(e.message));
+    await this.notes?.reconcile().catch(() => {});
     this.render();
   }
 
@@ -360,6 +368,7 @@ export class Call {
     }
     const key = [...speaking].sort().join(',') + '|' + this.active;
     if (key !== this.speakingKey) { this.speakingKey = key; this.speaking = speaking; this.render(); }
+    this.renderCaptions();
   }
 
   async refreshTrouble() {
@@ -380,12 +389,17 @@ export class Call {
       </div>
       <nav class="ui-callbar meet-bar" id="bar" aria-label="Call controls"></nav>
       <div id="audios" hidden></div>
+      <dialog class="ui-dialog meet-dlg" id="notesdlg" aria-label="Notes notice"></dialog>
+      <div class="meet-more" id="more" hidden></div>
     </div>`;
     this.root.removeAttribute('aria-busy');
     this.root.querySelector('#bar').addEventListener('click', (e) => this.onBar(e));
     this.root.querySelector('#side').addEventListener('click', (e) => this.onSide(e));
     this.root.querySelector('#side').addEventListener('submit', (e) => this.onSideSubmit(e));
     this.root.querySelector('#notices').addEventListener('click', (e) => this.onNotice(e));
+    this.root.querySelector('#notesdlg').addEventListener('click', (e) => this.onSide(e));
+    this.root.querySelector('#notesdlg').addEventListener('cancel', (e) => e.preventDefault()); // answer it; Escape does not count as an answer
+    this.root.querySelector('#more').addEventListener('click', (e) => this.onMore(e));
   }
 
   render() {
@@ -400,6 +414,9 @@ export class Call {
     root.dataset.panel = this.panel ?? '';
     root.dataset.layout = this.layout;
     this.root.querySelector('#mode').textContent = modeLabel(this.plan, this.engine);
+    const topr = this.markers();
+    const tr = this.root.querySelector('#topr');
+    if (tr.innerHTML !== topr) tr.innerHTML = topr;
     this.renderNotices();
     this.renderStage();
     this.renderBar();
@@ -436,7 +453,7 @@ export class Call {
     let main = stage.querySelector('.meet-main');
     let grid = stage.querySelector('.ui-calls');
     if (!grid) {
-      stage.innerHTML = '<div class="meet-main"></div><div class="ui-calls"></div>';
+      stage.innerHTML = '<div class="meet-main"></div><div class="ui-calls"></div><div class="meet-cap" id="captions"></div>';
       main = stage.querySelector('.meet-main'); grid = stage.querySelector('.ui-calls');
     }
     stage.classList.toggle('has-big', !!big);
@@ -455,6 +472,7 @@ export class Call {
     // Keep tile order stable: me first, then by join order.
     for (const t of list) { const el = this.tiles.get(t.key); if (el.parentElement === grid) grid.append(el); }
     this.fit();
+    this.renderCaptions();
     // Tell the engine what we look at, so only those streams are sent to us.
     const owners = (pred) => list.filter(pred).flatMap((t) => this.peersOf(t.pid));
     this.engine?.setView?.({ visible: owners((t) => !t.mine && t !== big), big: big && !big.mine ? this.peersOf(big.pid)[0] ?? null : null });
@@ -544,12 +562,13 @@ export class Call {
       canPub ? b('mic', 'meet.set_my_media', this.audioOn, this.audioOn ? 'Mute' : 'Unmute', icon(this.audioOn ? 'mic' : 'mic-off')) : '',
       canPub ? b('cam', 'meet.set_my_media', this.videoOn, this.videoOn ? 'Turn camera off' : 'Turn camera on', icon(this.videoOn ? 'cam' : 'cam-off')) : '',
       canPub && navigator.mediaDevices?.getDisplayMedia ? b('share', 'meet.set_sharing', this.local.screen ? true : null, this.local.screen ? 'Stop sharing' : 'Share screen', icon('screen')).replace('<button', `<button class="${this.local.screen ? 'is-on' : ''}"`) : '',
-      b('hand', 'meet.raise_hand', hand ? true : null, hand ? 'Lower hand' : 'Raise hand', icon('hand')).replace('<button', `<button class="${hand ? 'is-on' : ''}"`),
-      b('layout', 'meet.set_layout', null, this.layout === 'grid' ? 'Speaker view' : 'Grid view', icon(this.layout === 'grid' ? 'speaker' : 'grid')),
+      b('hand', 'meet.raise_hand', hand ? true : null, hand ? 'Lower hand' : 'Raise hand', icon('hand')).replace('<button', `<button class="meet-hide-sm ${hand ? 'is-on' : ''}"`),
+      b('layout', 'meet.set_layout', null, this.layout === 'grid' ? 'Speaker view' : 'Grid view', icon(this.layout === 'grid' ? 'speaker' : 'grid')).replace('<button', '<button class="meet-hide-sm"'),
       `<span class="meet-bar-sep" aria-hidden="true"></span>`,
       b('people', 'none', null, 'People', `${icon('people')}${this.amHost() && this.waiting ? `<span class="meet-dot">${this.waiting}</span>` : ''}`, 'opens the people panel'),
       b('chat', 'none', null, 'Chat', `${icon('chat')}${unread && this.panel !== 'chat' ? `<span class="meet-dot">${unread}</span>` : ''}`, 'opens the chat panel'),
-      b('info', 'none', null, 'Call details', icon('info'), 'opens call details'),
+      b('notes', 'none', null, this.notes?.status?.on ? 'Notes (on)' : 'Notes', `${icon('notes')}${this.notes?.status?.on ? '<span class="meet-dot is-rec"></span>' : ''}`, 'opens the notes panel'),
+      b('more', 'none', this.moreOpen ? true : null, 'More', icon('more'), 'opens more call options'),
       `<button class="is-leave" data-act="leave" data-tool="meet.leave">Leave</button>`,
     ].join('');
     const bar = this.root.querySelector('#bar');
@@ -560,23 +579,28 @@ export class Call {
     const side = this.root.querySelector('#side');
     if (!this.panel) { if (side.innerHTML) side.innerHTML = ''; return; }
     const tab = (k, label) => `<button role="tab" aria-selected="${this.panel === k}" data-tool="none" data-why="switches the side panel" data-panel="${k}">${label}</button>`;
-    const head = `<div class="meet-side-h"><div class="ui-tabs" role="tablist">${tab('people', `People <span class="ui-badge is-quiet">${this.people.filter((p) => p.in_call || p.id === this.me.id).length}</span>`)}${tab('chat', 'Chat')}${tab('info', 'Details')}</div><button class="ui-x" data-tool="none" data-why="closes the side panel" data-act="close" aria-label="Close">×</button></div>`;
+    const head = `<div class="meet-side-h"><div class="ui-tabs" role="tablist">${tab('people', `People <span class="ui-badge is-quiet">${this.people.filter((p) => p.in_call || p.id === this.me.id).length}</span>`)}${tab('chat', 'Chat')}${tab('notes', 'Notes')}${tab('info', 'Details')}</div><button class="ui-x" data-tool="none" data-why="closes the side panel" data-act="close" aria-label="Close">×</button></div>`;
     let body = '';
     if (this.panel === 'people') body = this.peopleHtml();
     if (this.panel === 'chat') body = this.chatHtml();
     if (this.panel === 'info') body = this.infoHtml();
+    if (this.panel === 'notes') body = this.notes?.panelHtml() ?? '<p class="ui-empty">Loading notes…</p>';
     const html = head + `<div class="meet-side-b">${body}</div>`;
     if (side.dataset.html === html) return;
-    // Keep what someone is typing in the chat box.
-    const draft = side.querySelector('#chatbox')?.value;
-    const focused = document.activeElement?.id === 'chatbox';
+    // Keep what someone is typing (the chat box, the notes forms) and where they scrolled.
+    const drafts = [...side.querySelectorAll('input[id]')].map((i) => [i.id, i.value]);
+    const focused = document.activeElement?.closest?.('#side') ? document.activeElement.id : null;
+    const scroll = side.querySelector('.meet-side-b')?.scrollTop ?? 0;
+    const atEnd = (() => { const b = side.querySelector('.meet-side-b'); return !b || b.scrollTop + b.clientHeight >= b.scrollHeight - 8; })();
     side.innerHTML = html;
     side.dataset.html = html;
-    const box = side.querySelector('#chatbox');
-    if (box && draft) box.value = draft;
-    if (box && focused) box.focus();
+    for (const [id, v] of drafts) { const i = side.querySelector(`#${id}`); if (i && v) i.value = v; }
+    if (focused) side.querySelector(`#${focused}`)?.focus();
     const list = side.querySelector('.meet-chatlist');
     if (list) list.scrollTop = list.scrollHeight;
+    const sb = side.querySelector('.meet-side-b');
+    if (sb) sb.scrollTop = this.panel === 'notes' && atEnd && this.panelWas === 'notes' ? sb.scrollHeight : scroll;
+    this.panelWas = this.panel;
   }
 
   peopleHtml() {
@@ -646,7 +670,8 @@ export class Call {
       if (a === 'share') this.local.screen ? await this.stopShare() : await this.startShare();
       if (a === 'hand') { const me = this.people.find((p) => p.id === this.me.id); await callTool('meet.raise_hand', { meeting: this.meeting.id, raised: !me?.hand_raised }); }
       if (a === 'layout') { this.layout = this.layout === 'grid' ? 'speaker' : 'grid'; this.render(); await callTool('meet.set_layout', { meeting: this.meeting.id, layout: this.layout }); }
-      if (a === 'people' || a === 'chat' || a === 'info') this.openPanel(this.panel === a ? null : a);
+      if (a === 'people' || a === 'chat' || a === 'info' || a === 'notes') this.openPanel(this.panel === a ? null : a);
+      if (a === 'more') { this.moreOpen = !this.moreOpen; this.renderMore(); this.render(); }
       if (a === 'leave') await this.leave();
     } catch (err) { toast(err.message); }
   }
@@ -666,6 +691,7 @@ export class Call {
     if (!b) return;
     const a = b.dataset.act, pid = b.dataset.pid, mid = this.meeting.id;
     try {
+      if (/^(notes-|send-|captions$)/.test(a)) { b.disabled = true; try { return await this.notes?.onAct(a, b); } finally { b.disabled = false; } }
       if (a === 'close') return this.openPanel(null);
       if (a === 'admit') await callTool('meet.admit', { meeting: mid, participant: pid });
       if (a === 'admit-all') await callTool('meet.admit', { meeting: mid, all: true });
@@ -691,6 +717,13 @@ export class Call {
   }
 
   async onSideSubmit(e) {
+    if (e.target.dataset.act?.startsWith('send-')) {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type=submit]');
+      if (btn) btn.disabled = true;
+      try { await this.notes?.onSubmit(e.target); } catch (err) { toast(err.message); } finally { if (btn) btn.disabled = false; }
+      return;
+    }
     if (e.target.id !== 'chatform') return;
     e.preventDefault();
     const box = e.target.querySelector('#chatbox');
@@ -708,6 +741,52 @@ export class Call {
     if (b.dataset.act === 'dismiss') { this.requests = this.requests.filter((r) => r.id !== b.dataset.id); this.render(); }
     if (b.dataset.act === 'admit-all') await callTool('meet.admit', { meeting: this.meeting.id, all: true }).catch((err) => toast(err.message));
     if (b.dataset.act === 'see-waiting') this.openPanel('people');
+  }
+
+  // What everyone must be able to see while it is happening: notes on, recording.
+  markers() {
+    return [this.notes?.marker() ?? '', this.recMarker?.() ?? ''].join('');
+  }
+
+  renderCaptions() {
+    const el = this.root.querySelector('#captions');
+    if (!el) return;
+    const html = this.notes?.captionsHtml() ?? '';
+    if (el.innerHTML !== html) el.innerHTML = html;
+  }
+
+  // The More menu: things used less often, and on a phone the ones the bar has no room for.
+  moreItems() {
+    const me = this.people.find((p) => p.id === this.me.id);
+    const hand = !!me?.hand_raised;
+    const item = (act, tool, label, ic, why = '') => `<button class="meet-more-i" data-act="${act}" ${tool === 'none' ? `data-tool="none" data-why="${esc(why)}"` : `data-tool="${tool}"`}>${icon(ic, 18)}<span>${esc(label)}</span></button>`;
+    return [
+      item('hand', 'meet.raise_hand', hand ? 'Lower hand' : 'Raise hand', 'hand'),
+      item('layout', 'meet.set_layout', this.layout === 'grid' ? 'Speaker view' : 'Grid view', this.layout === 'grid' ? 'speaker' : 'grid'),
+      ...(this.extraMore?.() ?? []).map((x) => item(...x)),
+      item('captions', 'none', this.notes?.captions ? 'Hide captions' : 'Show captions', 'captions', 'shows or hides captions on this screen only'),
+      item('info', 'none', 'Call details', 'info', 'opens call details'),
+    ].join('');
+  }
+
+  renderMore() {
+    const el = this.root.querySelector('#more');
+    if (!el) return;
+    el.hidden = !this.moreOpen;
+    if (this.moreOpen) el.innerHTML = `<div class="meet-more-in" role="menu">${this.moreItems()}</div>`;
+  }
+
+  async onMore(e) {
+    const b = e.target.closest('button[data-act]');
+    if (e.target === e.currentTarget || b) { this.moreOpen = false; this.renderMore(); this.render(); }
+    if (!b) return;
+    const a = b.dataset.act;
+    try {
+      if (a === 'hand' || a === 'layout') return this.onBar({ target: b });
+      if (a === 'captions') return this.notes?.onAct('captions');
+      if (a === 'info') return this.openPanel('info');
+      await this.onExtra?.(a, b);
+    } catch (err) { toast(err.message); }
   }
 
   // ------------------------------------------------------------ for tests and the parity report

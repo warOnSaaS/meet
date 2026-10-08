@@ -77,4 +77,30 @@ CREATE TABLE IF NOT EXISTS meeting_notes (
 );
 `,
   },
+  {
+    id: 4,
+    name: 'notes: consent, transcript lines, notes columns, settings',
+    sql: `
+ALTER TABLE meetings ADD COLUMN notes_on INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE meetings ADD COLUMN notes_by TEXT;
+ALTER TABLE meetings ADD COLUMN notes_started_at BIGINT;
+ALTER TABLE meetings ADD COLUMN notes_targets TEXT;
+CREATE TABLE IF NOT EXISTS meet_notes_consents (
+  meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, participant_id TEXT NOT NULL,
+  answer TEXT NOT NULL DEFAULT 'pending', engine TEXT, notice_shown_at BIGINT, answered_at BIGINT,
+  PRIMARY KEY (meeting_id, participant_id)
+);
+CREATE TABLE IF NOT EXISTS meet_segments (
+  id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE, participant_id TEXT,
+  speaker TEXT NOT NULL, start_at BIGINT NOT NULL, end_at BIGINT NOT NULL, text TEXT NOT NULL, engine TEXT,
+  written_by TEXT, created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS meet_segments_meeting ON meet_segments (meeting_id, start_at);
+ALTER TABLE meeting_notes ADD COLUMN model TEXT;
+ALTER TABLE meeting_notes ADD COLUMN scripted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE meeting_notes ADD COLUMN written_at BIGINT;
+ALTER TABLE meeting_notes ADD COLUMN sent TEXT;
+CREATE TABLE IF NOT EXISTS meet_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+`,
+  },
 ];

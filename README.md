@@ -35,6 +35,7 @@ Or without Docker: `npm install && npm start` (Node 22 or newer). It uses SQLite
 | Other apps | `meet.huddle` opens (or finds) the live room for a record, such as a Chat channel, with no waiting room. Chat huddles use it. |
 | Export | `meet.export` gives you every meeting you host, who joined and the chat, as JSON. |
 | Check | `meet doctor` (and the `meet.doctor` tool) checks UDP, TLS, TURN and the media server, and says what to fix. |
+| AI notes | Off until a host turns them on. Everyone is asked first; each person's own device writes down only their own voice (Whisper, in the browser), captions reach the others encrypted, and when the call ends a summary, decisions and action items are written and sent to the CRM, the board, Chat and email (inside wOS). See [AI notes](#ai-notes). |
 | Recording | Off. It is not built yet, and when it is, it will only start after everyone in the call is told and agrees. |
 
 ## How a call is carried
@@ -62,9 +63,40 @@ Signalling (how browsers find each other) goes through this app's own server: a 
 | A computer leaving | Every person keeps a warm standby connection to a second computer, already connected and encrypted. If their computer stops answering for 3 seconds, they switch. A computer that is shutting down hands its people over first. |
 | Privacy | Browsers encrypt every audio and video frame with the meeting's key (WebRTC encoded transforms, AES-GCM), which the app's server gives only to people it admits. The computers carrying the call, and LiveKit (its own E2EE with our key), forward frames they cannot read; a test hands one browser a wrong key and checks it decrypts nothing and shows no video. The app's own server stores the key, so whoever runs that server could read a call they also capture; it never sees the media itself. Direct calls are encrypted between the two browsers by WebRTC. |
 
+## AI notes
+
+| | |
+|---|---|
+| Who writes down what | Each person's browser writes down only that person's microphone, with Whisper (MIT) running on the device through transformers.js (Apache-2.0): on the graphics chip with WebGPU (whisper-base.en, about 80 MB, downloaded once) or on the processor (whisper-tiny.en, about 40 MB). Audio never leaves the device for this. |
+| When a device cannot | The browser's own speech service (Web Speech API) where Whisper cannot run; the Notes panel says so, because Chrome and Safari may send that audio to their servers. With no speech at all on the device, a helper does it: another person in the call whose device can, and who already receives that person's audio, decrypted, as part of the call. Failing that, if the team set a speech service (any OpenAI-compatible `/audio/transcriptions`, such as whisper.cpp's server), the device sends short clips of its own speech there. A desktop computer carrying the call (a participant host) is never used: it cannot hear the call, by design. |
+| Captions and the timeline | Each line (speaker, start, end, text) goes to the others over the call's encrypted channel (AES-GCM with the meeting key, sealed in the browser, carried by the signalling mailbox, so the server sees ciphertext) and shows as captions; each screen merges everyone's lines into one timeline. While notes are on, lines are also kept with the meeting (`meet.add_transcript`) for the notes. |
+| The notes | `meet.summarise` writes a summary, decisions and action items with the team's model (any OpenAI-compatible address, model and key, in Settings or `NOTES_MODEL_URL`, `NOTES_MODEL`, `NOTES_MODEL_KEY`). With no model set, a short script writes them and every screen labels them "Demo notes (a script, not AI)", so the public demo has no model bill. They are written by themselves when the meeting ends. |
+| Where notes go (inside wOS) | `meet.notes_to_crm` (a meeting activity on the linked deal, contact or organization), `meet.notes_to_board` (one task per action item, with its owner), `meet.notes_to_chat` (a post in the channel the call started from), `meet.notes_to_email` (to the team members who joined, through the Email app's alerts). Each is optional; the host can choose them when turning notes on and they run when the meeting ends. |
+| Consent | [docs/RECORDING-CONSENT.md](docs/RECORDING-CONSENT.md). |
+
+Measured on one Mac (Apple silicon, 10 cores), headless Chromium, two people, each browser's fake microphone fed a known recording (three sentences each, text to speech made at test time; `test/e2e/notes.test.mjs`), 2026-10-07:
+
+| | |
+|---|---|
+| Engine | Whisper tiny.en on the processor (WebAssembly; headless Chromium has no WebGPU) |
+| Accuracy | 0 word errors in 32 (Sam) and 0 in 26 (Jordan) on the first full pass. Synthetic, clean speech: expect real microphones in real rooms to do worse. |
+| Speaker labels | Every line carried the right name; neither device ever wrote down the other person's words. |
+| Delay, end of speech to the caption on the other screen | 2.5 s median (2.5 to 2.7 s, 10 lines). Of that, 0.7 s is the pause that marks the end of a sentence and about 1.8 s is the model; the encrypted channel and signalling add about 0.1 s. |
+| Speed | 0.45 s of work per second of speech on the processor, so one device keeps up with its own person with room to spare. |
+| Start | 6 s from "Turn notes on" to listening on both devices, with the model already in the browser's cache (a first download adds the model's size over your connection). |
+| Helper | With Jordan's device set to "cannot transcribe", Sam's device wrote down Jordan's lines, labelled Jordan, from the audio it already received. |
+| Leaving your voice out | After Jordan chose "Leave my voice out", no Jordan lines were kept over the next 45 s, while Sam's continued. |
+
+| Device and browser limits | |
+|---|---|
+| Desktop Chrome, Edge (WebGPU) | base.en on the graphics chip; fastest and most accurate. |
+| Desktop Firefox, Safari | tiny.en on the processor (Safari 26 has WebGPU and uses it). Needs about 300 MB of free memory while it runs. |
+| Phones | Works on recent phones on the processor, but slower and warmer, and iOS may stop the model when the browser goes to the background. Devices that report under 2 GB of memory skip Whisper and use the browser's speech service or a helper. |
+| Very old browsers (no WebAssembly workers) | A helper in the call, or the team's speech service. |
+
 ## Tools
 
-38 tools (`tools.json`, in the suite's format). The planned recording, transcript, notes and agent tools are listed so agents know they are coming; calling one says it is not built yet. `meet.start_recording` needs a person's yes.
+TOOL_COUNT tools (`tools.json`, in the suite's format). The planned tools are listed so agents know they are coming; calling one says it is not built yet. `meet.start_notes` and `meet.start_recording` need a person's yes when an agent asks.
 
 ## Development
 
