@@ -11,6 +11,8 @@ export function loadConfig(env = process.env) {
     devLogin: env.DEV_LOGIN === '1',
     // Anyone may start a meeting without signing in (the hosted demo). Off by default for self-hosters.
     openCreate: env.OPEN_CREATE === '1',
+    // Hosted: sign-in with a warOnSaaS account (see server/account.mjs).
+    account: (env.AUTH_PROVIDER ? env.AUTH_PROVIDER === 'waronsaas' : !!env.WOS_ACCOUNT_CLIENT_ID) && !!env.WOS_ACCOUNT_CLIENT_ID,
     github: { clientId: env.GITHUB_CLIENT_ID || '', clientSecret: env.GITHUB_CLIENT_SECRET || '', allow: list(env.GITHUB_ALLOW).map((s) => s.toLowerCase()) },
     stun: list(env.STUN_URLS ?? 'stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478'),
     turn: turnUrls.length ? { urls: turnUrls, secret: env.TURN_SECRET || '', username: env.TURN_USERNAME || '', credential: env.TURN_CREDENTIAL || '' } : null,

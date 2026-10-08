@@ -26,8 +26,8 @@ export function verify(secret, token, kind) {
 export const id = (prefix = '') => prefix + crypto.randomBytes(9).toString('base64url');
 export const secretToken = (n = 18) => crypto.randomBytes(n).toString('base64url');
 
-export function sessionToken(config, user) {
-  return sign(config.secret, { k: 'session', uid: user.id, exp: now() + 30 * 864e5 });
+export function sessionToken(config, user, sid = null) {
+  return sign(config.secret, { k: 'session', uid: user.id, ...(sid ? { sid } : {}), exp: now() + 30 * 864e5 });
 }
 
 export function cookieHeader(value, maxAgeS, secure = true) {
@@ -40,7 +40,9 @@ export async function callerFrom(req, { db, config }) {
   const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
   const cookie = new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`).exec(req.headers.cookie ?? '')?.[1];
   const s = verify(config.secret, bearer || (cookie && decodeURIComponent(cookie)), 'session');
-  if (s) out.user = await db.get('SELECT * FROM meet_users WHERE id = ?', [s.uid]);
+  // Signed in through a warOnSaaS account: still signed in there? (cached a minute)
+  const live = s?.sid ? await (await import('./account.mjs')).accountFor(config)?.isLive(s.sid) ?? true : true;
+  if (s && live) out.user = await db.get('SELECT * FROM meet_users WHERE id = ?', [s.uid]);
   const t = req.headers['x-meet-ticket'];
   if (t) out.ticket = verify(config.secret, t, 'ticket');
   return out;

@@ -9,6 +9,20 @@ let app = null;
 let nav = null; // { suite, path(), query(), go(p), replace(p), href(p) }
 const REPO = 'https://github.com/warOnSaaS/meet';
 const state = { who: null };
+// Hosted: one free warOnSaaS account (GitHub, Google or email link at account.waronsaas.com). Self-hosted: GitHub.
+const accountSignin = () => state.who?.signin_url === '/auth/waronsaas';
+const signinUrl = () => state.who?.signin_url || '/auth/github';
+const signinLabel = () => (accountSignin() ? 'Sign in' : `${icon('github')} Sign in with GitHub`);
+// Already signed in to warOnSaaS in this browser? Sign in here too, once per tab, with no clicks.
+function silentSignIn() {
+  try {
+    if (nav.suite || state.who?.user || !accountSignin() || nav.query().get('silent') || sessionStorage.getItem('meet:silent')) return false;
+    if (!/(?:^|;\s*)wos_signed_in=1/.test(document.cookie)) return false;
+    sessionStorage.setItem('meet:silent', '1');
+    location.replace(`/auth/waronsaas?prompt=none&next=${encodeURIComponent(location.pathname + location.search)}`);
+    return true;
+  } catch { return false; }
+}
 window.meetState = state;
 const $ = (id) => app.querySelector(`#${id}`);
 
@@ -31,6 +45,7 @@ export async function route() {
 
 async function routeInner() {
   state.who = await callTool('meet.whoami').catch(() => ({ user: null, can_start: false }));
+  if (silentSignIn()) return;
   const p = nav.path().split('?')[0];
   const m = /^\/m\/([^/?#]+)/.exec(p);
   if (m) return joinPage(decodeURIComponent(m[1]));
@@ -48,7 +63,7 @@ function topBar() {
   const u = state.who?.user;
   const right = u
     ? `<span class="ui-avatar is-sm" aria-hidden="true">${u.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : esc(initials(u.name))}</span><span class="hide-sm">${esc(u.name)}</span><a class="ui-btn is-ghost is-sm" href="/auth/signout">Sign out</a>`
-    : state.who?.signin_available ? `<a class="ui-btn is-quiet is-sm" href="/auth/github?next=${encodeURIComponent(location.pathname + location.search)}">${icon('github')} Sign in with GitHub</a>` : '';
+    : state.who?.signin_available ? `<a class="ui-btn is-quiet is-sm" href="${signinUrl()}?next=${encodeURIComponent(location.pathname + location.search)}">${signinLabel()}</a>` : '';
   return `<header class="ui-top meet-top"><a class="ui-brand meet-brand" href="${nav.href('/')}">${icon('video')}<span>Meetings</span></a><div class="meet-top-r">${right}</div></header>`;
 }
 
@@ -66,7 +81,7 @@ async function homePage() {
       <h1 class="meet-h1">Video meetings for small teams</h1>
       <p class="meet-lead">${nav.suite ? 'Start a call and send the link. People on your team walk straight in; anyone else with the link waits until you let them in. Calls of up to 4 people go straight between you.' : 'Start a call, send the link, talk. Guests join from a browser with no account. Small calls go straight between people; bigger ones are carried by a computer in the call, encrypted so it cannot see or hear them.'}</p>
       <div class="meet-actions">
-        ${w.can_start ? `<button class="ui-btn is-accent is-lg" data-tool="meet.create" id="start">${icon('video')} Start a meeting</button>` : signedIn ? '' : w.signin_available ? `<a class="ui-btn is-accent is-lg" href="/auth/github">${icon('github')} Sign in to start a meeting</a>` : ''}
+        ${w.can_start ? `<button class="ui-btn is-accent is-lg" data-tool="meet.create" id="start">${icon('video')} Start a meeting</button>` : signedIn ? '' : w.signin_available ? `<a class="ui-btn is-accent is-lg" href="${signinUrl()}?next=${encodeURIComponent(location.pathname + location.search)}">${accountSignin() ? '' : icon('github')} Sign in to start a meeting</a>` : ''}
         <form class="meet-joinform" data-tool="meet.get" id="joinform">
           <label class="ui-sr" for="joinlink">Meeting link or code</label>
           <input class="ui-input" id="joinlink" name="link" placeholder="Paste a meeting link" autocomplete="off">
@@ -254,7 +269,7 @@ async function joinPage(token) {
       ${m.notes_on ? '<div class="ui-notice is-quiet meet-join-notice"><span><span class="ui-dot is-bad"></span> Notes are on in this meeting. Before anything you say is written down, you are asked, and you can say no.</span></div>' : ''}
       <label class="ui-field"><span class="ui-label">Your name</span><input class="ui-input" name="name" value="${esc(name)}" required maxlength="60" autocomplete="name" placeholder="Your name"></label>
       <button class="ui-btn is-accent is-lg is-block" type="submit" data-tool="meet.join">${hostKey || m.you_host ? 'Start the meeting' : 'Join'}</button>
-      ${!state.who.user && state.who.signin_available ? `<p class="ui-hint">Have an account? <a href="/auth/github?next=${encodeURIComponent(location.pathname + location.search)}">Sign in with GitHub</a>.</p>` : ''}
+      ${!state.who.user && state.who.signin_available ? `<p class="ui-hint">Have an account? <a href="${signinUrl()}?next=${encodeURIComponent(location.pathname + location.search)}">${accountSignin() ? 'Sign in' : 'Sign in with GitHub'}</a>. Guests need no account.</p>` : ''}
     </form>
   </main>`;
   app.removeAttribute('aria-busy');

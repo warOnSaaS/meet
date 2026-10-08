@@ -10,6 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { tools, byName, catalogue, ToolError } from './tools/meet.mjs';
+import { accountRoutes } from './account.mjs';
 import { callerFrom, sign, verify, githubLoginRedirect, githubCallback, upsertUser, sessionToken, cookieHeader, safeNext } from './auth.mjs';
 import { createRoom } from './room/room.mjs';
 import { handleMcp } from './mcp.mjs';
@@ -55,6 +56,7 @@ export function createApp({ db, config }) {
       }
       if (p === '/mcp') return handleMcp(req, res, { app, base, body, json });
       if (p.startsWith('/media/')) return media(req, res, p, url, base);
+      if (p.startsWith('/auth/') && (await accountRoutes(p, req, res, url, app, base))) return;
       if (p === '/auth/github') return githubLoginRedirect(res, config, base, url.searchParams.get('next'));
       if (p === '/auth/github/callback') return githubCallback(req, res, app, base);
       if (p === '/auth/dev' && config.devLogin) {

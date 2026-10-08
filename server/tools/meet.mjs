@@ -49,7 +49,7 @@ async function requireIn(ctx, m) {
   fail('forbidden', 'Join the meeting first.', 403);
 }
 const requireMember = (ctx) => ctx.caller.user || fail('sign_in', 'Sign in to do that.', 401);
-const canCreate = (ctx) => ctx.caller.user || ctx.config.openCreate || fail('sign_in', 'Sign in with GitHub to start a meeting.', 401);
+const canCreate = (ctx) => ctx.caller.user || ctx.config.openCreate || fail('sign_in', ctx.config.account ? 'Sign in with your free warOnSaaS account to start a meeting.' : 'Sign in with GitHub to start a meeting.', 401);
 
 const joinUrl = (ctx, m) => `${ctx.base}/m/${m.link_token}`;
 function meetingOut(ctx, m, extra = {}) {
@@ -136,7 +136,7 @@ export const tools = [
     input: { type: 'object', properties: {} },
     async handler(ctx) {
       const u = ctx.caller.user;
-      return { user: u ? { id: u.id, name: u.name, github_login: u.github_login, avatar_url: u.avatar_url } : null, can_start: !!u || ctx.config.openCreate, can_schedule: !!u, signin_available: !!ctx.config.github.clientId || ctx.config.devLogin, dev_login: ctx.config.devLogin, media: { p2p_max: ctx.config.p2pMax, livekit: !!ctx.config.livekit, turn: !!ctx.config.turn } };
+      return { user: u ? { id: u.id, name: u.name, github_login: u.github_login, avatar_url: u.avatar_url } : null, can_start: !!u || ctx.config.openCreate, can_schedule: !!u, signin_available: !!ctx.config.github.clientId || ctx.config.devLogin || !!ctx.config.account, signin_url: ctx.config.account ? '/auth/waronsaas' : '/auth/github', dev_login: ctx.config.devLogin, media: { p2p_max: ctx.config.p2pMax, livekit: !!ctx.config.livekit, turn: !!ctx.config.turn } };
     },
   },
   {
@@ -179,7 +179,7 @@ export const tools = [
     async handler(ctx, a) {
       const m = await meetingRow(ctx, a.meeting);
       const mine = await me(ctx, m);
-      return meetingOut(ctx, m, { you: partOut(mine), you_host: isOwner(ctx, m) || ['host', 'cohost'].includes(mine?.role), signed_in: !!ctx.caller.user, signin_available: !!ctx.config.github.clientId });
+      return meetingOut(ctx, m, { you: partOut(mine), you_host: isOwner(ctx, m) || ['host', 'cohost'].includes(mine?.role), signed_in: !!ctx.caller.user, signin_available: !!ctx.config.github.clientId || !!ctx.config.account, signin_url: ctx.config.account ? '/auth/waronsaas' : '/auth/github' });
     },
   },
   {
