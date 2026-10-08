@@ -84,10 +84,11 @@ Measured on one Mac (Apple silicon, 10 cores), headless Chromium, two people, ea
 | Engine | Whisper tiny.en on the processor (WebAssembly; headless Chromium has no WebGPU) |
 | Accuracy | 0 word errors in 32 (Sam) and 0 in 26 (Jordan) on the first full pass. Synthetic, clean speech: expect real microphones in real rooms to do worse. |
 | Speaker labels | Every line carried the right name; neither device ever wrote down the other person's words. |
-| Delay, end of speech to the caption on the other screen | 2.5 s median (2.5 to 2.7 s, 10 lines). Of that, 0.7 s is the pause that marks the end of a sentence and about 1.8 s is the model; the encrypted channel and signalling add about 0.1 s. |
-| Speed | 0.45 s of work per second of speech on the processor, so one device keeps up with its own person with room to spare. |
-| Start | 6 s from "Turn notes on" to listening on both devices, with the model already in the browser's cache (a first download adds the model's size over your connection). |
-| Helper | With Jordan's device set to "cannot transcribe", Sam's device wrote down Jordan's lines, labelled Jordan, from the audio it already received. |
+| Delay, end of speech to the caption on the other screen | 2.5 s and 3.0 s median in two runs (2.5 to 3.2 s over 19 lines). Of that, 0.7 s is the pause that marks the end of a sentence and 1.8 to 2.2 s is the model; the encrypted channel and signalling add about 0.1 s. |
+| Speed | 0.45 to 0.6 s of work per second of speech on the processor (headless, no graphics chip, with the Mac busy with other work), so one device keeps up with its own person. |
+| Start | 6 to 8 s from "Turn notes on" to listening on both devices, with the model already in the browser's cache (a first download adds the model's size over your connection). |
+| Helper | With Jordan's device set to "cannot transcribe", Sam's device wrote down Jordan's lines, labelled Jordan, from the audio it already received (decoded call audio is a little less accurate: "Casey" came out as "AC" once). |
+| Inside wOS (live, app.waronsaas.com) | The walkthrough's guest spoke the recording; their own browser wrote it down and the host saw the captions with the guest's name 56 s after notes went on (most of that the first model download); the notes were written from 3 lines. |
 | Leaving your voice out | After Jordan chose "Leave my voice out", no Jordan lines were kept over the next 45 s, while Sam's continued. |
 
 | Device and browser limits | |
@@ -99,7 +100,7 @@ Measured on one Mac (Apple silicon, 10 cores), headless Chromium, two people, ea
 
 ## Tools
 
-TOOL_COUNT tools (`tools.json`, in the suite's format). The planned tools are listed so agents know they are coming; calling one says it is not built yet. `meet.start_notes` and `meet.start_recording` need a person's yes when an agent asks.
+66 tools (`tools.json`, in the suite's format). The planned tools are listed so agents know they are coming; calling one says it is not built yet. `meet.start_notes` and `meet.start_recording` need a person's yes when an agent asks.
 
 ## Development
 

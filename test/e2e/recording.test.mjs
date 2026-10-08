@@ -41,7 +41,7 @@ test('recording: everyone is asked, a no leaves that person out, the file goes t
   await sam.click('#recdlg [data-act=rec-yes]');
   await jordan.click('#recdlg [data-act=rec-no]');
   await sam.waitForFunction(() => window.meetCall.recording.snapshot().recording, null, { timeout: 10000 });
-  await jordan.waitForSelector('#topr .ui-chip.is-bad.meet-rec-on');
+  await jordan.waitForSelector('#topr .meet-rec-on.is-rec');
   const snap = await sam.evaluate(() => window.meetCall.recording.snapshot());
   assert.deepEqual(snap.included, [sid], 'only Sam, who agreed, is in the recording');
   await sleep(4000);
